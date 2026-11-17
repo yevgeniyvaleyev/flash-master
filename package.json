@@ -36,6 +36,7 @@
     "eslint-config-expo": "~58.0.4",
     "jest": "~30.5.2",
     "jest-expo": "~58.0.13",
+    "pngjs": "^3.4.0",
     "prettier": "^3.9.10",
     "typescript": "~6.0.3"
   },
@@ -45,7 +46,8 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest",
-    "format": "prettier --write src modules/*/index.ts"
+    "format": "prettier --write src modules/*/index.ts scripts",
+    "icons": "node scripts/icons/generate.mjs"
   },
   "private": true,
   "jest": {
