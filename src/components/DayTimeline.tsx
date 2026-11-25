@@ -4,6 +4,8 @@ import { StyleSheet, Text, View } from 'react-native';
 import type { DayTimeline as Timeline, TimelineSegment } from '@/logic/budget';
 import { useColors } from '@/theme';
 
+import { TopicMark } from './TopicMark';
+
 const hhmm = (ms: number) => {
   const d = new Date(ms);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -41,12 +43,15 @@ export function DayTimeline({
   timeline,
   nextTitle,
   alarms,
+  icons,
 }: {
   timeline: Timeline;
   /** Label of the next planned topic block. */
   nextTitle?: string;
   /** Study alarms are active (an installed build with alarms enabled). */
   alarms: boolean;
+  /** Topic icons by topic id: shown in the legend instead of the color swatch. */
+  icons?: ReadonlyMap<number, string | null>;
 }) {
   const colors = useColors();
   const { start, end, now, segments, ticks, latestStart, shortageMs, ended, plan, nextAlarm } = timeline;
@@ -74,16 +79,16 @@ export function DayTimeline({
   };
 
   // Legend: minutes ahead of "now" per kind, work per topic (in its color).
-  const totals = new Map<string, { color: string; label: string; ms: number }>();
-  const add = (key: string, color: string, label: string, ms: number) => {
+  const totals = new Map<string, { color: string; label: string; ms: number; icon?: string | null }>();
+  const add = (key: string, color: string, label: string, ms: number, icon?: string | null) => {
     const cur = totals.get(key);
-    totals.set(key, { color, label, ms: (cur?.ms ?? 0) + ms });
+    totals.set(key, { color, label, ms: (cur?.ms ?? 0) + ms, icon });
   };
   for (const s of segments) {
     const ms = s.end - s.start;
     if (s.kind === 'fun') add('fun', colors.primary, 'Развлечения', ms);
     if (s.kind === 'free') add('free', colors.border, 'Свободно', ms);
-    if (s.kind === 'study') add(`t${s.topicId}`, s.color, s.name, ms);
+    if (s.kind === 'study') add(`t${s.topicId}`, s.color, s.name, ms, icons?.get(s.topicId));
   }
 
   const status = ended
@@ -197,7 +202,11 @@ export function DayTimeline({
         <View style={styles.legend}>
           {[...totals.values()].map((l) => (
             <View key={`${l.label}${l.color}`} style={styles.legendItem}>
-              <View style={[styles.swatch, { backgroundColor: l.color }]} />
+              {l.icon ? (
+                <TopicMark color={l.color} icon={l.icon} size={10} />
+              ) : (
+                <View style={[styles.swatch, { backgroundColor: l.color }]} />
+              )}
               <Text style={{ color: colors.textMuted, fontSize: 12 }}>
                 {l.label} {minutes(l.ms)}
               </Text>

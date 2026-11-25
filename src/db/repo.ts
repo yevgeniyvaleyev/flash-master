@@ -3,6 +3,8 @@ import { dayProgress, type DayProgress, type Entry, type Topic, type TopicMode }
 import type { HistoryEntry } from '@/logic/history';
 import type { DayResults } from '@/logic/progress';
 import type { TopicDay } from '@/logic/stats';
+import { normalizeUrl } from '@/logic/links';
+import { dayRules, doneKey, EVERY_DAY, nextDay, type Credit, type DayRule } from '@/logic/day-rules';
 import { colorForId, nextTopicColor } from '@/logic/topic-colors';
 
 import { db, writeTransaction } from './client';
@@ -21,8 +23,13 @@ interface TopicRow {
   mode: string;
   position_total: number | null;
   position_current: number | null;
+  done_before: number | null;
+  deadline_minutes: number | null;
   linked_package: string | null;
+  link_url: string | null;
   color: string | null;
+  icon: string | null;
+  weekdays: number | null;
   paused: number;
   completed_at: number | null;
   reset_at: number | null;
@@ -42,8 +49,13 @@ const toTopic = (r: TopicRow): Topic => ({
   mode: r.mode === 'position' ? 'position' : 'count',
   positionTotal: r.position_total,
   positionCurrent: r.position_current,
+  doneBefore: r.done_before ?? 0,
+  deadlineMinutes: r.deadline_minutes,
   linkedPackage: r.linked_package,
+  linkUrl: r.link_url,
   color: r.color ?? colorForId(r.id),
+  icon: r.icon,
+  weekdays: r.weekdays,
   paused: r.paused === 1,
   completedAt: r.completed_at,
   resetAt: r.reset_at,
@@ -77,8 +89,16 @@ export interface TopicInput {
   positionTotal: number | null;
   positionCurrent: number | null;
   linkedPackage: string | null;
+  /** Web address (normalized; anything but http(s) is dropped). */
+  linkUrl: string | null;
+  /** Daily deadline in minutes after midnight; null = none. */
+  deadlineMinutes: number | null;
   /** null: the next unused palette color (new topic) or unchanged (edit). */
   color: string | null;
+  /** Icon name (validated by the form against the icon font); null = the color dot. */
+  icon: string | null;
+  /** Weekday bitmask (Mon = 1 … Sun = 64); null or 127 = every day. */
+  weekdays: number | null;
   paused: boolean;
 }
 
@@ -93,10 +113,17 @@ const clampInput = (t: TopicInput) => {
     maxGrant: t.maxGrantMinutes == null ? null : Math.max(0, t.maxGrantMinutes),
     step: Math.max(1, Math.round(t.step)),
     mode: t.mode,
-    total: t.mode === 'position' && t.positionTotal != null ? Math.max(1, Math.round(t.positionTotal)) : null,
+    total: t.positionTotal != null ? Math.max(1, Math.round(t.positionTotal)) : null,
     current: t.mode === 'position' && t.positionCurrent != null ? Math.max(0, Math.round(t.positionCurrent)) : null,
     linked: t.linkedPackage || null,
+    link: normalizeUrl(t.linkUrl),
+    deadline: t.deadlineMinutes == null ? null : Math.max(0, Math.min(1439, Math.round(t.deadlineMinutes))),
     color: t.color && /^#[0-9a-f]{6}$/i.test(t.color) ? t.color : null,
+    icon: t.icon && /^[a-z0-9-]{1,64}$/.test(t.icon) ? t.icon : null,
+    weekdays:
+      t.weekdays == null || (t.weekdays & EVERY_DAY) === EVERY_DAY || (t.weekdays & EVERY_DAY) === 0
+        ? null
+        : t.weekdays & EVERY_DAY,
     paused: t.paused ? 1 : 0,
   };
 };
@@ -107,8 +134,9 @@ export async function createTopic(input: TopicInput, now: number = Date.now()): 
   const color = t.color ?? nextTopicColor((await listTopics()).map((x) => x.color));
   const r = await db.runAsync(
     `INSERT INTO topics (name, unit, daily_target, unlock_min, minutes_per_unit, max_grant_minutes, step, mode,
-       position_total, position_current, linked_package, color, paused, sort_order, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       position_total, position_current, linked_package, link_url, deadline_minutes, color, icon, weekdays, paused,
+       sort_order, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     t.name,
     t.unit,
     t.target,
@@ -120,7 +148,11 @@ export async function createTopic(input: TopicInput, now: number = Date.now()): 
     t.total,
     t.current,
     t.linked,
+    t.link,
+    t.deadline,
     color,
+    t.icon,
+    t.weekdays,
     t.paused,
     (max?.m ?? 0) + 1,
     now,
@@ -133,7 +165,8 @@ export async function updateTopic(id: number, input: TopicInput): Promise<void> 
   await db.runAsync(
     `UPDATE topics SET name = ?, unit = ?, daily_target = ?, unlock_min = ?, minutes_per_unit = ?,
        max_grant_minutes = ?, step = ?, mode = ?,
-       position_total = ?, position_current = ?, linked_package = ?, color = COALESCE(?, color), paused = ?
+       position_total = ?, position_current = ?, linked_package = ?, link_url = ?, deadline_minutes = ?,
+       color = COALESCE(?, color), icon = ?, weekdays = ?, paused = ?
      WHERE id = ?`,
     t.name,
     t.unit,
@@ -146,7 +179,11 @@ export async function updateTopic(id: number, input: TopicInput): Promise<void> 
     t.total,
     t.current,
     t.linked,
+    t.link,
+    t.deadline,
     t.color,
+    t.icon,
+    t.weekdays,
     t.paused,
     id,
   );
@@ -163,15 +200,26 @@ export async function setTopicCompleted(id: number, at: number | null): Promise<
 
 /**
  * Starts the topic's progress over: statistics and the total count from `at` on; entries and the day log stay.
- * `position` (book mode) sets the page to start from; null leaves it.
+ * `start` is where the overall progress starts: the page in book mode (null leaves it), the units already done in
+ * count mode (null = 0).
  */
-export async function resetTopicProgress(id: number, at: number, position: number | null): Promise<void> {
+export async function resetTopicProgress(id: number, at: number, start: number | null): Promise<void> {
+  const n = start == null ? null : Math.max(0, Math.round(start));
   await db.runAsync(
-    'UPDATE topics SET reset_at = ?, position_current = COALESCE(?, position_current) WHERE id = ?',
+    `UPDATE topics SET reset_at = ?,
+       position_current = CASE WHEN mode = 'position' THEN COALESCE(?, position_current) ELSE position_current END,
+       done_before = CASE WHEN mode = 'position' THEN done_before ELSE COALESCE(?, 0) END
+     WHERE id = ?`,
     at,
-    position == null ? null : Math.max(0, Math.round(position)),
+    n,
+    n,
     id,
   );
+}
+
+/** Count mode: sets the units toward the total not covered by the entries since the reset (may be negative). */
+export async function setTopicDoneBefore(id: number, units: number): Promise<void> {
+  await db.runAsync('UPDATE topics SET done_before = ? WHERE id = ?', units, id);
 }
 
 /** Hides the topic everywhere except history and statistics. */
@@ -279,13 +327,83 @@ export interface Today {
   topics: Topic[];
   entries: Entry[];
   progress: DayProgress;
+  /** Each topic's rule today: weekday, credit (see day-rules.ts). */
+  rules: Map<number, DayRule>;
+  /** Tomorrow's rules (alarms and reminders plan the next day with them). */
+  tomorrow: Map<number, DayRule>;
 }
+
+/** How far back credits and their days' work are loaded (a credit's last day is at most 2 active days on). */
+const CREDIT_LOOKBACK_DAYS = 21;
 
 /** Everything about today's norm in one load. */
 export async function loadToday(today: Date = new Date()): Promise<Today> {
   const day = dayKey(today);
-  const [topics, entries] = await Promise.all([listTopics(), getEntries(day)]);
-  return { day, topics, entries, progress: dayProgress(topics, entries) };
+  const since = dayKey(addDays(today, -CREDIT_LOOKBACK_DAYS));
+  const [topics, entries, credits, done] = await Promise.all([
+    listTopics(),
+    getEntries(day),
+    listCredits(since),
+    getDoneByDay(since),
+  ]);
+  const rules = dayRules(topics, credits, done, day);
+  const tomorrow = dayRules(topics, credits, done, nextDay(day));
+  return { day, topics, entries, progress: dayProgress(topics, entries, today.getTime(), rules), rules, tomorrow };
+}
+
+// ---------- Credits ----------
+
+/** Credits taken on `sinceDay` or later. */
+export async function listCredits(sinceDay: string): Promise<Credit[]> {
+  const rows = await db.getAllAsync<{
+    id: number;
+    topic_id: number;
+    day: string;
+    days: number;
+    target: number;
+    minimum: number;
+  }>('SELECT * FROM credits WHERE day >= ? ORDER BY day, id', sinceDay);
+  return rows.map((r) => ({
+    id: r.id,
+    topicId: r.topic_id,
+    day: r.day,
+    days: r.days,
+    target: r.target,
+    minimum: r.minimum,
+  }));
+}
+
+/** Units per topic per day since `sinceDay` (keys from `doneKey`). */
+async function getDoneByDay(sinceDay: string): Promise<Map<string, number>> {
+  const rows = await db.getAllAsync<{ topic_id: number; day: string; n: number }>(
+    'SELECT topic_id, day, SUM(units) AS n FROM entries WHERE day >= ? GROUP BY topic_id, day',
+    sinceDay,
+  );
+  return new Map(rows.map((r) => [doneKey(r.topic_id, r.day), r.n]));
+}
+
+/** Takes a credit on the topic today: its unfinished target moves to its next `days` (1–2) active days. */
+export async function addCredit(
+  topicId: number,
+  days: number,
+  target: number,
+  minimum: number,
+  now: number = Date.now(),
+): Promise<void> {
+  await db.runAsync(
+    'INSERT INTO credits (topic_id, day, days, target, minimum, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    topicId,
+    dayKey(new Date(now)),
+    Math.max(1, Math.min(2, Math.round(days))),
+    target,
+    minimum,
+    now,
+  );
+}
+
+/** Cancels a credit (only offered on the day it was taken). */
+export async function deleteCredit(id: number): Promise<void> {
+  await db.runAsync('DELETE FROM credits WHERE id = ?', id);
 }
 
 /** Upserts the day's per-topic results and the day's totals (streak, charts, statistics). */

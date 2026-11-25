@@ -15,6 +15,10 @@ export const BACKGROUND_SETTING_KEYS = [
   'minSessionMinutes',
   'blockedPackages',
   'alarmsEnabled',
+  'reminderVibration',
+  'alarmVibration',
+  'alarmVibrationRepeat',
+  'alarmSound',
 ] as const;
 
 /** Brings reminders, study alarms and the native app blocker in line with the current progress and settings. */

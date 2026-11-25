@@ -19,3 +19,33 @@ export function etaDays(left: number, avgPerDay: number): number | null {
   if (!(avgPerDay > 0)) return null;
   return Math.ceil(left / avgPerDay);
 }
+
+export interface OverallProgress {
+  done: number;
+  total: number;
+  left: number;
+  /** 0..1 */
+  share: number;
+}
+
+/**
+ * Progress through the whole topic toward its total (a book's pages, a course's minutes, a deck's cards); null when
+ * the topic has no total. Book mode: the page reached. Count mode: `doneBefore` plus the units logged since the reset.
+ */
+export function overallProgress(
+  topic: {
+    mode: 'count' | 'position';
+    positionTotal: number | null;
+    positionCurrent: number | null;
+    doneBefore: number;
+  },
+  loggedSinceReset: number,
+): OverallProgress | null {
+  const total = topic.positionTotal;
+  if (total == null || total <= 0) return null;
+  const done = Math.max(
+    0,
+    topic.mode === 'position' ? (topic.positionCurrent ?? 0) : topic.doneBefore + loggedSinceReset,
+  );
+  return { done, total, left: Math.max(0, total - done), share: Math.min(1, done / total) };
+}

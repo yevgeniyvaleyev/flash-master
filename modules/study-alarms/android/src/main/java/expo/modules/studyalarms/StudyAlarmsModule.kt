@@ -16,6 +16,8 @@ class AlarmItemRecord : Record {
   @Field var title: String = ""
   @Field var difficulty: String = "easy"
   @Field var costMs: Double = 0.0
+  /** The topic's deadline in minutes after midnight; -1 = none. */
+  @Field var deadlineMinutes: Int = -1
 }
 
 /** Planning inputs pushed from JS whenever progress or settings change. */
@@ -31,6 +33,11 @@ class AlarmConfig : Record {
   /** A fresh day's full work (every target), planned for tomorrow or once the stored day is over. */
   @Field var tomorrowGoal: Int = 0
   @Field var tomorrow: List<AlarmItemRecord> = emptyList()
+  /** The ring's vibration waveform ([off, on, off, …] ms; empty = none) and the index it repeats from (-1 = once). */
+  @Field var vibrationTimings: List<Double> = emptyList()
+  @Field var vibrationRepeat: Int = 0
+  /** Alarm sound: "" = the default alarm sound, "silent" = none, else a content URI. */
+  @Field var sound: String = ""
 }
 
 class StudyAlarmsModule : Module() {
@@ -67,6 +74,35 @@ class StudyAlarmsModule : Module() {
           Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
         }
       context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** The alarm screen can open by itself while the phone is in use (accessibility service or overlay permission). */
+    Function("canOpenAlarmScreen") {
+      AlarmLauncher.canLaunch(context)
+    }
+
+    Function("openOverlaySettings") {
+      val intent =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+          Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+        } else {
+          Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+        }
+      context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** Alarm sounds of the phone (then its ringtones), for «Мелодия будильника». */
+    Function("getAlarmSounds") {
+      AlarmSounds.list(context).map { (title, uri) -> mapOf("title" to title, "uri" to uri) }
+    }
+
+    /** Plays a sound for a few seconds ("" = the default alarm sound). */
+    Function("previewSound") { sound: String ->
+      AlarmSounds.preview(context, sound)
+    }
+
+    Function("stopPreview") {
+      AlarmSounds.stopPreview()
     }
 
     Function("testAlarm") {

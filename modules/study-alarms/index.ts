@@ -10,6 +10,8 @@ export interface AlarmItem {
   difficulty: string;
   /** Estimated time for the work. */
   costMs: number;
+  /** The topic's deadline in minutes after midnight (the plan fits the item before it); -1 = none. */
+  deadlineMinutes: number;
 }
 
 export interface StudyAlarmsConfig {
@@ -28,6 +30,11 @@ export interface StudyAlarmsConfig {
   /** A fresh day's full targets: planned for tomorrow, or once the stored day is over. */
   tomorrowGoal: number;
   tomorrow: AlarmItem[];
+  /** The ring's vibration waveform ([off, on, off, …] ms; empty = none) and the index it repeats from (-1 = once). */
+  vibrationTimings: number[];
+  vibrationRepeat: number;
+  /** Alarm sound: '' = the default alarm sound, 'silent' = none, else a content URI from getAlarmSounds. */
+  sound: string;
 }
 
 export interface NextAlarm {
@@ -43,6 +50,17 @@ interface StudyAlarmsModule {
   /** Android 14+ may deny full-screen alarms; they then show as a heads-up notification. */
   canUseFullScreenIntent(): boolean;
   openFullScreenIntentSettings(): void;
+  /**
+   * Whether the alarm screen opens by itself while the phone is in use: needs the app blocker's accessibility service
+   * or «Поверх других приложений». Without either, an alarm in use is only a heads-up notification.
+   */
+  canOpenAlarmScreen(): boolean;
+  /** The phone's alarm sounds, then its ringtones. */
+  getAlarmSounds(): { title: string; uri: string }[];
+  /** Plays a sound for 5 seconds ('' = the default alarm sound). */
+  previewSound(sound: string): void;
+  stopPreview(): void;
+  openOverlaySettings(): void;
   /** Rings a test alarm in a few seconds. */
   testAlarm(): void;
 }

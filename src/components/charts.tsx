@@ -4,19 +4,29 @@ import Svg, { Line, Rect } from 'react-native-svg';
 
 import { useColors } from '@/theme';
 
+import { TopicMark } from './TopicMark';
+
 export interface TopicBar {
   key: string | number;
   name: string;
   color: string;
+  /** Topic icon, shown before the name. */
+  icon?: string | null;
   done: number;
   target: number;
   minimum: number;
+  /** Target met (by the deadline); defaults to done ≥ target. */
+  targetMet?: boolean;
+  /** The topic's deadline «15:00» and whether it was missed. */
+  deadline?: string | null;
+  missed?: boolean;
 }
 
 /**
  * One horizontal bar per topic, stacked in a single column: the full topic name (wraps, never cut) with the count on
  * the right, then the bar filled in the topic's color toward its target with a line at the minimum (the unlock level).
- * A lock means the minimum isn't met yet (the fill stays faded until it is); a check means the target is met.
+ * A lock means the minimum isn't met yet (the fill stays faded until it is); a check means the target is met. A
+ * topic with a deadline shows its time (red once missed).
  */
 export function TopicBars({ items }: { items: readonly TopicBar[] }) {
   const colors = useColors();
@@ -25,12 +35,19 @@ export function TopicBars({ items }: { items: readonly TopicBar[] }) {
       {items.map((t) => {
         const total = Math.max(1, t.target);
         const ratio = Math.min(1, t.done / total);
-        const targetMet = t.done >= t.target;
+        const targetMet = t.targetMet ?? t.done >= t.target;
         const minMet = t.done >= t.minimum;
         return (
           <View key={t.key} style={styles.barItem}>
             <View style={styles.barHead}>
+              {t.icon ? <TopicMark color={t.color} icon={t.icon} size={10} /> : null}
               <Text style={[styles.barTitle, { color: colors.text }]}>{t.name}</Text>
+              {t.deadline != null && !targetMet && (
+                <View style={styles.barDeadline}>
+                  <Ionicons name="alarm-outline" size={13} color={t.missed ? colors.danger : colors.textMuted} />
+                  <Text style={{ color: t.missed ? colors.danger : colors.textMuted, fontSize: 12 }}>{t.deadline}</Text>
+                </View>
+              )}
               <Ionicons
                 name={targetMet ? 'checkmark-circle' : minMet ? 'lock-open' : 'lock-closed'}
                 size={13}
@@ -190,6 +207,7 @@ const styles = StyleSheet.create({
   barsList: { gap: 12 },
   barItem: { gap: 5 },
   barHead: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  barDeadline: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   barTitle: { flex: 1, fontSize: 14, fontWeight: '600' },
   barValue: { fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
   barTrack: { height: 10, borderRadius: 5, overflow: 'hidden' },

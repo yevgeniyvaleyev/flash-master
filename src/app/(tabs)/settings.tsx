@@ -3,10 +3,31 @@ import { AppBlocker } from '@modules/app-blocker';
 import { StudyAlarms } from '@modules/study-alarms';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  Alert,
+  AppState,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  Vibration,
+  View,
+} from 'react-native';
 
 import { BackupSection } from '@/components/BackupSection';
+import { PickerModal } from '@/components/PickerModal';
 import { Row, Stepper } from '@/components/SettingRows';
+import {
+  VIBRATION_REPEATS,
+  VIBRATIONS,
+  vibrationOf,
+  vibrationRepeatOf,
+  vibrationWaveform,
+  type VibrationKey,
+  type VibrationRepeat,
+} from '@/logic/vibration';
 import { ensureNotificationPermission, remindersSupported } from '@/notifications/reminders';
 import { useSettings, type ThemeMode } from '@/store/settings';
 import { useColors } from '@/theme';
@@ -38,6 +59,95 @@ function useNativeValue<T>(read: () => T): T {
   return value;
 }
 
+/** A setting chosen from a list: shows the current value; picking an option saves it (and may preview it). */
+function ChoiceRow({
+  label,
+  hint,
+  value,
+  current,
+  options,
+  onOpen,
+  onPick,
+}: {
+  label: string;
+  hint?: string;
+  /** Label of the current value. */
+  value: string;
+  /** Key of the current option (marked in the list). */
+  current: string;
+  options: { key: string; label: string }[];
+  onOpen?: () => void;
+  onPick: (key: string) => void;
+}) {
+  const colors = useColors();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Pressable
+        onPress={() => {
+          onOpen?.();
+          setOpen(true);
+        }}
+      >
+        <Row label={label} hint={hint}>
+          <View style={styles.vibrationValue}>
+            <Text style={{ color: colors.primary, fontWeight: '600', maxWidth: 160 }} numberOfLines={1}>
+              {value}
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+          </View>
+        </Row>
+      </Pressable>
+      <PickerModal
+        visible={open}
+        title={label}
+        options={options.map((o) => ({ key: o.key, label: o.key === current ? `✓ ${o.label}` : o.label }))}
+        onPick={onPick}
+        onClose={() => setOpen(false)}
+      />
+    </>
+  );
+}
+
+/** Plays a waveform on the phone (a loop previews two cycles). */
+function previewVibration(pattern: readonly number[], repeat: VibrationRepeat = vibrationRepeatOf('1')) {
+  Vibration.cancel();
+  const w = vibrationWaveform(pattern, repeat.count == null ? { ...repeat, count: 2 } : repeat);
+  if (w.timings.length > 0) Vibration.vibrate(w.timings);
+}
+
+/** A vibration preset picker; picking one saves it and plays it as a preview. */
+function VibrationRow({
+  label,
+  value,
+  repeat,
+  onChange,
+}: {
+  label: string;
+  value: VibrationKey;
+  /** Repetition the preview plays with (alarms). */
+  repeat?: VibrationRepeat;
+  onChange: (key: VibrationKey) => void;
+}) {
+  return (
+    <ChoiceRow
+      label={label}
+      hint="Нажми, чтобы выбрать — выбранная вибрация проиграется"
+      value={vibrationOf(value).label}
+      current={value}
+      options={VIBRATIONS.map((v) => ({ key: v.key, label: v.label }))}
+      onPick={(key) => {
+        const v = vibrationOf(key);
+        onChange(v.key);
+        previewVibration(v.pattern, repeat);
+      }}
+    />
+  );
+}
+
+const DEFAULT_SOUND = { key: '', label: 'Стандартный будильник' };
+const SILENT_SOUND = { key: 'silent', label: 'Без звука' };
+
 const formatAlarm = (at: number) => {
   const d = new Date(at);
   const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -49,6 +159,8 @@ export default function SettingsScreen() {
   const s = useSettings();
   const serviceEnabled = useNativeValue(() => AppBlocker?.isServiceEnabled() ?? false);
   const fullScreenAllowed = useNativeValue(() => StudyAlarms?.canUseFullScreenIntent() ?? true);
+  const alarmScreenOpens = useNativeValue(() => StudyAlarms?.canOpenAlarmScreen() ?? true);
+  const [sounds, setSounds] = useState<{ title: string; uri: string }[]>([]);
   const nextAlarm = useNativeValue(() => StudyAlarms?.getNextAlarm() ?? null);
 
   const card = [styles.card, { backgroundColor: colors.surface, borderColor: colors.border }];
@@ -196,6 +308,11 @@ export default function SettingsScreen() {
                 onChange={(v) => s.update({ reminderIntervalHours: v })}
               />
             </Row>
+            <VibrationRow
+              label="Вибрация"
+              value={s.reminderVibration}
+              onChange={(reminderVibration) => s.update({ reminderVibration })}
+            />
           </>
         )}
       </View>
@@ -247,6 +364,57 @@ export default function SettingsScreen() {
                 </Pressable>
               </Row>
             )}
+            {!alarmScreenOpens && (
+              <Row
+                label="Будильник поверх приложений"
+                hint="Сейчас, пока телефоном пользуются, будильник приходит свёрнутым уведомлением. Разрешите «Поверх других приложений» (или включите блокировку приложений), чтобы он всегда открывался на весь экран"
+              >
+                <Pressable
+                  onPress={() => StudyAlarms?.openOverlaySettings()}
+                  style={[styles.button, { backgroundColor: colors.primary }]}
+                >
+                  <Text style={{ color: colors.onPrimary, fontWeight: '700' }}>Разрешить</Text>
+                </Pressable>
+              </Row>
+            )}
+            <ChoiceRow
+              label="Мелодия будильника"
+              hint="Нажми, чтобы выбрать — мелодия проиграется 5 секунд"
+              value={
+                s.alarmSound === ''
+                  ? DEFAULT_SOUND.label
+                  : s.alarmSound === 'silent'
+                    ? SILENT_SOUND.label
+                    : s.alarmSoundTitle || 'Своя'
+              }
+              current={s.alarmSound}
+              onOpen={() => setSounds(StudyAlarms?.getAlarmSounds() ?? [])}
+              options={[DEFAULT_SOUND, SILENT_SOUND, ...sounds.map((x) => ({ key: x.uri, label: x.title }))]}
+              onPick={(key) => {
+                const title = key === '' || key === 'silent' ? '' : (sounds.find((x) => x.uri === key)?.title ?? '');
+                s.update({ alarmSound: key, alarmSoundTitle: title });
+                if (key !== 'silent') StudyAlarms?.previewSound(key);
+                else StudyAlarms?.stopPreview();
+              }}
+            />
+            <VibrationRow
+              label="Вибрация будильника"
+              value={s.alarmVibration}
+              repeat={vibrationRepeatOf(s.alarmVibrationRepeat)}
+              onChange={(alarmVibration) => s.update({ alarmVibration })}
+            />
+            <ChoiceRow
+              label="Повтор вибрации"
+              hint="Сколько раз вибрирует будильник; «пока не отвечу» — до ответа или минуты звонка"
+              value={vibrationRepeatOf(s.alarmVibrationRepeat).label}
+              current={s.alarmVibrationRepeat}
+              options={VIBRATION_REPEATS.map((r) => ({ key: r.key, label: r.label }))}
+              onPick={(key) => {
+                const r = vibrationRepeatOf(key);
+                s.update({ alarmVibrationRepeat: r.key });
+                previewVibration(vibrationOf(s.alarmVibration).pattern, r);
+              }}
+            />
             <Row label="Проверить" hint="Будильник зазвонит через 5 секунд — можно заблокировать экран">
               <Pressable
                 onPress={() => StudyAlarms?.testAlarm()}
@@ -326,6 +494,7 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
+  vibrationValue: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   content: { padding: 16, paddingBottom: 32 },
   section: {
     fontSize: 13,

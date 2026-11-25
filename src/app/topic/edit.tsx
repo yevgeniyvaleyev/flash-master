@@ -4,10 +4,15 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
+import { IconPickerModal } from '@/components/IconPickerModal';
 import { PickerModal } from '@/components/PickerModal';
 import { Row } from '@/components/SettingRows';
+import { TopicMark } from '@/components/TopicMark';
 import { getTopic, type TopicInput } from '@/db/repo';
 import { archiveTopic, createTopic, updateTopic } from '@/logic/actions';
+import { EVERY_DAY, weekdayMask, WEEKDAY_NAMES } from '@/logic/day-rules';
+import { formatMinutes, parseTime } from '@/logic/dates';
+import { normalizeUrl } from '@/logic/links';
 import { TOPIC_COLORS } from '@/logic/topic-colors';
 import { useSettings } from '@/store/settings';
 import { useColors } from '@/theme';
@@ -35,8 +40,16 @@ interface Form {
   total: string;
   current: string;
   linked: string | null;
+  /** Web address as typed; '' = none. */
+  link: string;
+  /** «15:00»; '' = no deadline. */
+  deadline: string;
   /** null: the next unused palette color is assigned on create. */
   color: string | null;
+  /** Icon name; null = the color dot. */
+  icon: string | null;
+  /** Weekday bitmask, Mon = 1 … Sun = 64. */
+  weekdays: number;
   paused: boolean;
 }
 
@@ -50,6 +63,7 @@ export default function TopicEditScreen() {
   const editing = id != null;
   const defaultMinutes = useSettings((s) => s.defaultMinutesPerUnit);
   const globalMaxGrant = useSettings((s) => s.maxGrantMinutes);
+  const endHour = useSettings((s) => s.reminderEndHour);
   const unlockShare = useSettings((s) => s.defaultUnlockShare);
   const blocked = useSettings((s) => s.blockedPackages);
   const [form, setForm] = useState<Form | null>(
@@ -67,13 +81,18 @@ export default function TopicEditScreen() {
           total: '',
           current: '',
           linked: null,
+          link: '',
+          deadline: '',
           color: null,
+          icon: null,
+          weekdays: EVERY_DAY,
           paused: false,
         },
   );
   const [minTouched, setMinTouched] = useState(editing);
   const [apps, setApps] = useState<LaunchableApp[]>([]);
   const [picking, setPicking] = useState(false);
+  const [pickingIcon, setPickingIcon] = useState(false);
 
   useEffect(() => {
     if (!editing) return;
@@ -91,7 +110,11 @@ export default function TopicEditScreen() {
         total: t.positionTotal != null ? String(t.positionTotal) : '',
         current: t.positionCurrent != null ? String(t.positionCurrent) : '',
         linked: t.linkedPackage,
+        link: t.linkUrl ?? '',
+        deadline: t.deadlineMinutes != null ? formatMinutes(t.deadlineMinutes) : '',
         color: t.color,
+        icon: t.icon,
+        weekdays: weekdayMask(t),
         paused: t.paused,
       });
     });
@@ -120,8 +143,12 @@ export default function TopicEditScreen() {
     if (form.maxGrant.trim() && !(num(form.maxGrant) >= 0))
       errors.push('Максимум развлечений — число от 0 (или пусто — общее значение)');
     if (!isInt(form.step, 1)) errors.push('Шаг — целое число от 1');
-    if (form.book && form.total.trim() && !isInt(form.total, 1)) errors.push('Страниц в книге — целое число');
+    if (form.total.trim() && !isInt(form.total, 1))
+      errors.push(form.book ? 'Страниц в книге — целое число' : 'Всего — целое число');
     if (form.book && form.current.trim() && !isInt(form.current, 0)) errors.push('Текущая страница — целое число');
+    if (form.link.trim() && normalizeUrl(form.link) == null) errors.push('Ссылка — адрес сайта, например coursera.org');
+    if ((form.weekdays & EVERY_DAY) === 0) errors.push('Выбери хотя бы один день недели');
+    if (form.deadline.trim() && parseTime(form.deadline) == null) errors.push('Срок — время вида 15:00 (или пусто)');
     if (errors.length > 0) {
       Alert.alert('Проверь поля', errors.join('\n'));
       return;
@@ -135,10 +162,14 @@ export default function TopicEditScreen() {
       maxGrantMinutes: form.maxGrant.trim() ? num(form.maxGrant) : null,
       step: num(form.step),
       mode: form.book ? 'position' : 'count',
-      positionTotal: form.book && form.total.trim() ? num(form.total) : null,
+      positionTotal: form.total.trim() ? num(form.total) : null,
       positionCurrent: form.book && form.current.trim() ? num(form.current) : null,
       linkedPackage: form.linked,
+      linkUrl: form.link.trim() ? normalizeUrl(form.link) : null,
+      deadlineMinutes: form.deadline.trim() ? parseTime(form.deadline) : null,
       color: form.color,
+      icon: form.icon,
+      weekdays: form.weekdays,
       paused: form.paused,
     };
     if (editing) await updateTopic(Number(id), input);
@@ -237,6 +268,22 @@ export default function TopicEditScreen() {
         {form.color == null && (
           <Text style={{ color: colors.textMuted, fontSize: 12 }}>Не выбран — будет назначен свободный цвет</Text>
         )}
+        <Pressable onPress={() => setPickingIcon(true)}>
+          <Row label="Иконка" hint={form.icon ? 'Показывается вместо цветной точки' : 'Нет — цветная точка'}>
+            {form.icon ? (
+              <TopicMark color={form.color ?? colors.primary} icon={form.icon} size={16} />
+            ) : (
+              <Ionicons name="add-circle-outline" size={22} color={colors.primary} />
+            )}
+          </Row>
+        </Pressable>
+        <IconPickerModal
+          visible={pickingIcon}
+          value={form.icon}
+          color={form.color ?? colors.primary}
+          onPick={(icon) => set({ icon })}
+          onClose={() => setPickingIcon(false)}
+        />
       </View>
 
       <View style={card}>
@@ -264,13 +311,52 @@ export default function TopicEditScreen() {
         <Row label="Быстрый шаг" hint="Вторая кнопка рядом с +1 (например, +5 страниц)">
           {numberInput(form.step, (step) => set({ step }))}
         </Row>
+        <Row
+          label="Срок на день"
+          hint={`Необязательно: к этому времени цель должна быть выполнена, иначе день не засчитан. План дня и будильники уложат тему до срока. Пусто — до конца дня (${endHour}:00)`}
+        >
+          <TextInput
+            value={form.deadline}
+            onChangeText={(deadline) => set({ deadline })}
+            keyboardType="numbers-and-punctuation"
+            placeholder="15:00"
+            placeholderTextColor={colors.textMuted}
+            selectTextOnFocus
+            style={[...input, styles.number]}
+          />
+        </Row>
+        <Text style={[styles.label, { color: colors.text }]}>Дни недели</Text>
+        <View style={styles.chips}>
+          {WEEKDAY_NAMES.map((name, i) => {
+            const on = (form.weekdays & (1 << i)) !== 0;
+            return (
+              <Pressable
+                key={name}
+                onPress={() => set({ weekdays: form.weekdays ^ (1 << i) })}
+                accessibilityState={{ selected: on }}
+                style={[
+                  styles.chip,
+                  {
+                    borderColor: on ? colors.primary : colors.border,
+                    backgroundColor: on ? colors.primary : colors.surface,
+                  },
+                ]}
+              >
+                <Text style={{ color: on ? colors.onPrimary : colors.text, fontWeight: '600' }}>{name}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+          В другие дни тема не входит в дневную норму и не прерывает серию
+        </Text>
       </View>
 
       <View style={card}>
         <Row label="Режим книги" hint="Вводишь страницу, на которой остановился — засчитывается разница">
           <Switch value={form.book} onValueChange={(book) => set({ book })} trackColor={{ true: colors.primary }} />
         </Row>
-        {form.book && (
+        {form.book ? (
           <>
             <Row label="Сейчас на странице" hint="С неё начнётся отсчёт">
               {numberInput(form.current, (current) => set({ current }))}
@@ -279,24 +365,52 @@ export default function TopicEditScreen() {
               {numberInput(form.total, (total) => set({ total }))}
             </Row>
           </>
+        ) : (
+          <Row
+            label={`Всего ${form.unit || 'ед.'} в теме`}
+            hint="Необязательно: весь объём (минут лекций, карт в колоде). Покажет общий прогресс и дату окончания"
+          >
+            {numberInput(form.total, (total) => set({ total }))}
+          </Row>
         )}
       </View>
 
       <View style={card}>
-        {AppBlocker && (
-          <Pressable onPress={() => setPicking(true)}>
-            <Row
-              label="Связанное приложение"
-              hint={
-                linkedLabel
+        <Pressable onPress={() => setPicking(true)} disabled={!AppBlocker}>
+          <Row
+            label="Связанное приложение"
+            hint={
+              !AppBlocker
+                ? 'Недоступно в Expo Go — работает в установленном приложении (APK)'
+                : linkedLabel
                   ? `${linkedLabel} — открывается из темы и никогда не блокируется`
                   : 'Например, приложение с карточками или читалка'
-              }
-            >
-              <Ionicons name={form.linked ? 'link' : 'add-circle-outline'} size={22} color={colors.primary} />
-            </Row>
-          </Pressable>
-        )}
+            }
+          >
+            <Ionicons
+              name={form.linked ? 'link' : 'add-circle-outline'}
+              size={22}
+              color={AppBlocker ? colors.primary : colors.textMuted}
+            />
+          </Row>
+        </Pressable>
+        <View style={{ gap: 6 }}>
+          <Text style={[styles.label, { color: colors.text }]}>Ссылка</Text>
+          <TextInput
+            value={form.link}
+            onChangeText={(link) => set({ link })}
+            keyboardType="url"
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="https://… (курс, колода, статья)"
+            placeholderTextColor={colors.textMuted}
+            style={input}
+          />
+          <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+            Необязательно: откроется в браузере с экрана темы. Если браузер в списке блокируемых, он откроется только
+            после минимума
+          </Text>
+        </View>
         <Row label="Пауза" hint="Тема на паузе не входит в дневную норму">
           <Switch
             value={form.paused}

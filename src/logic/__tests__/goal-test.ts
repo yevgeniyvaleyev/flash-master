@@ -1,4 +1,12 @@
-import { completionEvents, dayProgress, durationLabel, topicProgress, type Entry, type Topic } from '../goal';
+import {
+  completionEvents,
+  dayProgress,
+  deadlineLabel,
+  durationLabel,
+  topicProgress,
+  type Entry,
+  type Topic,
+} from '../goal';
 
 const topic = (patch: Partial<Topic> = {}): Topic => ({
   id: 1,
@@ -12,8 +20,13 @@ const topic = (patch: Partial<Topic> = {}): Topic => ({
   mode: 'count',
   positionTotal: null,
   positionCurrent: null,
+  doneBefore: 0,
+  deadlineMinutes: null,
   linkedPackage: null,
+  linkUrl: null,
+  weekdays: null,
   color: '#4C6EF5',
+  icon: null,
   paused: false,
   completedAt: null,
   resetAt: null,
@@ -99,4 +112,44 @@ it('formats durations', () => {
   expect(durationLabel(70 * 60_000)).toBe('~1 ч 10 мин');
   expect(durationLabel(120 * 60_000)).toBe('~2 ч');
   expect(durationLabel(0)).toBe('~1 мин');
+});
+
+describe('deadline', () => {
+  const day = new Date(2026, 10, 17);
+  const at = (h: number, m = 0) => new Date(2026, 10, 17, h, m).getTime();
+  const book = topic({ dailyTarget: 10, unlockMin: 2, deadlineMinutes: 15 * 60 });
+  const e = (units: number, ts: number): Entry => ({
+    id: nextId++,
+    topicId: 1,
+    day: '2026-11-17',
+    ts,
+    units,
+    position: null,
+  });
+
+  it('counts the target as met when reached before the deadline', () => {
+    const p = dayProgress([book], [e(6, at(10)), e(4, at(14, 59))], at(16)).topics[0];
+    expect(p).toMatchObject({ targetMet: true, deadlineMissed: false, deadline: at(15) });
+    expect(deadlineLabel(p)).toBeNull();
+  });
+
+  it('fails the target (and the day) when it is reached only after the deadline', () => {
+    const d = dayProgress([book], [e(6, at(10)), e(4, at(15, 30))], at(16));
+    expect(d.topics[0]).toMatchObject({ done: 10, leftToTarget: 0, targetMet: false, deadlineMissed: true });
+    expect(d.targetMet).toBe(false);
+    // Units after the deadline still count toward the minimum (unlock).
+    expect(d.unlocked).toBe(true);
+    expect(deadlineLabel(d.topics[0])).toBe('срок 15:00 пропущен');
+  });
+
+  it('is not missed before the deadline', () => {
+    const p = dayProgress([book], [e(3, at(10))], at(12)).topics[0];
+    expect(p).toMatchObject({ targetMet: false, deadlineMissed: false });
+    expect(deadlineLabel(p)).toBe('до 15:00');
+  });
+
+  it('leaves topics without a deadline as before', () => {
+    const p = dayProgress([topic({ dailyTarget: 5 })], [e(5, at(23))], day.getTime()).topics[0];
+    expect(p).toMatchObject({ targetMet: true, deadline: null, deadlineMissed: false });
+  });
 });

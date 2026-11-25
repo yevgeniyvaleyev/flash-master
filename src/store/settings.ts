@@ -3,6 +3,7 @@ import { create } from 'zustand';
 
 import { kvGet, kvSet } from '@/db/client';
 import { setDayStartHour } from '@/logic/dates';
+import type { VibrationKey, VibrationRepeatKey } from '@/logic/vibration';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -28,6 +29,14 @@ export interface Settings {
   reminderStartHour: number;
   reminderEndHour: number;
   reminderIntervalHours: number;
+  /** Vibration of reminders and of study alarms (presets in src/logic/vibration.ts). */
+  reminderVibration: VibrationKey;
+  alarmVibration: VibrationKey;
+  /** How often an alarm's vibration repeats (once, N times, until answered with a 5 s pause, nonstop). */
+  alarmVibrationRepeat: VibrationRepeatKey;
+  /** Alarm sound: '' = the phone's default alarm sound, 'silent' = none, else a content URI; title for display. */
+  alarmSound: string;
+  alarmSoundTitle: string;
   /** Daily copy into the folder picked in Settings (a copy inside the app is always made). */
   autoBackupEnabled: boolean;
   /** How many daily copies to keep in that folder. */
@@ -49,6 +58,11 @@ export const DEFAULT_SETTINGS: Settings = {
   reminderStartHour: 9,
   reminderEndHour: 21,
   reminderIntervalHours: 1,
+  reminderVibration: 'default',
+  alarmVibration: 'default',
+  alarmVibrationRepeat: 'loop-pause',
+  alarmSound: '',
+  alarmSoundTitle: '',
   alarmsEnabled: true,
   autoBackupEnabled: false,
   autoBackupKeep: 7,

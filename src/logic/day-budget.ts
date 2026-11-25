@@ -2,7 +2,7 @@ import { loadToday, type Today } from '@/db/repo';
 import { useSettings } from '@/store/settings';
 
 import { atHour, grantedMs, reserveMs, type UpcomingTask } from './budget';
-import { completionEvents, isActive, unitCostMs } from './goal';
+import { completionEvents, topicsForDay, unitCostMs } from './goal';
 import { splitSessions, type SessionInput, type WorkSession } from './sessions';
 
 /** Everything the adaptive budget and the day plan need for today, loaded from the DB and settings. */
@@ -31,8 +31,10 @@ export interface DayBudget {
 export async function loadDayBudget(now: number = Date.now()): Promise<DayBudget> {
   const s = useSettings.getState();
   const today = await loadToday(new Date(now));
-  const { progress, topics } = today;
-  const byId = new Map(topics.filter(isActive).map((t) => [t.id, t]));
+  const { progress, rules } = today;
+  // Today's norm: topics on their weekday, with today's targets (credits).
+  const topics = topicsForDay(today.topics, rules);
+  const byId = new Map(topics.map((t) => [t.id, t]));
 
   const upcoming: UpcomingTask[] = [];
   const left: SessionInput[] = [];
@@ -48,20 +50,24 @@ export async function loadDayBudget(now: number = Date.now()): Promise<DayBudget
         color: p.color,
         units: p.leftToTarget,
         unitMs: cost,
+        deadline: p.deadline,
+        deadlineMinutes: p.deadlineMinutes,
       });
   }
-  const blocks = splitSessions(left, s.minSessionMinutes * 60_000);
+  const start = atHour(now, s.reminderStartHour);
+  const deadline = atHour(now, s.reminderEndHour);
+  // Topics with a deadline spread their sessions over the part of the day before it.
+  const blocks = splitSessions(left, s.minSessionMinutes * 60_000, { from: Math.max(now, start), end: deadline });
 
   // Each unit is capped by its topic's own maximum, or the global one.
   const events = completionEvents(today.entries, topics).map((e) => {
     const own = byId.get(e.topicId)?.maxGrantMinutes;
     return { ...e, maxGrantMs: (own ?? s.maxGrantMinutes) * 60_000 };
   });
-  const deadline = atHour(now, s.reminderEndHour);
   const goal = progress.minTotal;
   return {
     now,
-    start: atHour(now, s.reminderStartHour),
+    start,
     deadline,
     today,
     goal,

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { DailyBars } from '@/components/charts';
+import { TopicMark } from '@/components/TopicMark';
 import { getDayResultRows, getHistory, getTopicDays, listTopics, loadToday } from '@/db/repo';
 import { useQuery } from '@/hooks/use-query';
 import { dayKey, lastDays } from '@/logic/dates';
@@ -133,7 +134,7 @@ export default function StatsScreen() {
                 onPress={() => router.push({ pathname: '/topic/[id]', params: { id: String(t.id) } })}
                 style={styles.topicRow}
               >
-                <View style={[styles.dot, { backgroundColor: t.color }]} />
+                <TopicMark color={t.color} icon={t.icon} size={10} />
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={{ color: colors.text, fontWeight: '700' }} numberOfLines={1}>
                     {t.name}
@@ -208,7 +209,6 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
-  dot: { width: 10, height: 10, borderRadius: 5 },
   content: { padding: 16, gap: 12, paddingBottom: 32 },
   card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 16, gap: 12 },
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },

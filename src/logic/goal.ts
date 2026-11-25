@@ -1,3 +1,6 @@
+import { atMinutes, formatMinutes } from './dates';
+import type { CreditNote, DayRule } from './day-rules';
+
 /**
  * The daily norm. Every active (not paused, completed or archived) topic has a target and a minimum of units per day:
  * - the minimum is what unlocks entertainment apps: once every active topic reached it, everything unlocks;
@@ -22,12 +25,27 @@ export interface Topic {
   step: number;
   /** 'position': units are logged by entering the page reached. */
   mode: TopicMode;
+  /** Total amount of the whole topic (book pages, lecture minutes, cards in the deck); null = open-ended. */
   positionTotal: number | null;
+  /** Book mode: the page reached. */
   positionCurrent: number | null;
+  /** Count mode: units toward the total that aren't in the entries since the reset (done before, corrections). */
+  doneBefore: number;
+  /**
+   * Daily deadline in minutes after midnight (900 = 15:00); null = none. The target counts only when reached by then,
+   * and the day plan and alarms fit the topic's work before it.
+   */
+  deadlineMinutes: number | null;
   /** App opened from the topic screen (never blocked). */
   linkedPackage: string | null;
+  /** Web address opened in the browser from the topic screen; null = none. */
+  linkUrl: string | null;
   /** Hex color of the topic (plan of the day, bars). */
   color: string;
+  /** MaterialCommunityIcons name shown in the topic's color instead of the dot; null = the dot. */
+  icon: string | null;
+  /** Days of the week the topic is active (bitmask Mon = 1 … Sun = 64); null = every day. */
+  weekdays: number | null;
   paused: boolean;
   /** When the topic was marked as fully finished; null while it's in progress. */
   completedAt: number | null;
@@ -60,7 +78,17 @@ export interface TopicProgress {
   leftToMin: number;
   leftToTarget: number;
   minMet: boolean;
+  /** The target was reached (by the deadline, when the topic has one). */
   targetMet: boolean;
+  /** Today's deadline as a timestamp; null without one. */
+  deadline: number | null;
+  deadlineMinutes: number | null;
+  /** The deadline has passed without the target: the topic's target (and the day) is failed. */
+  deadlineMissed: boolean;
+  /** Credit taken today, or debt being repaid today; null otherwise. */
+  credit: CreditNote | null;
+  /** A credit can be taken on this topic now. */
+  creditable: boolean;
 }
 
 export interface DayProgress {
@@ -83,10 +111,19 @@ export const isActive = (t: Pick<Topic, 'paused' | 'archived' | 'completedAt'>) 
 export const effectiveMin = (t: Pick<Topic, 'dailyTarget' | 'unlockMin'>) =>
   Math.max(0, Math.min(t.unlockMin, t.dailyTarget));
 
-export function topicProgress(topic: Topic, done: number): TopicProgress {
+/**
+ * One topic's progress today. With a deadline (`at`: its timestamp today), only `doneByDeadline` counts toward the
+ * target; `now` tells whether the deadline has passed.
+ */
+export function topicProgress(
+  topic: Topic,
+  done: number,
+  at: { deadline: number; doneByDeadline: number; now: number } | null = null,
+): TopicProgress {
   const target = Math.max(0, topic.dailyTarget);
   const minimum = effectiveMin(topic);
   const minDone = Math.min(done, minimum);
+  const targetMet = (at ? at.doneByDeadline : done) >= target;
   return {
     topicId: topic.id,
     name: topic.name,
@@ -99,7 +136,12 @@ export function topicProgress(topic: Topic, done: number): TopicProgress {
     leftToMin: minimum - minDone,
     leftToTarget: Math.max(0, target - done),
     minMet: done >= minimum,
-    targetMet: done >= target,
+    targetMet,
+    deadline: at?.deadline ?? null,
+    deadlineMinutes: at ? topic.deadlineMinutes : null,
+    deadlineMissed: at != null && !targetMet && at.now >= at.deadline,
+    credit: null,
+    creditable: false,
   };
 }
 
@@ -110,10 +152,48 @@ export function unitsByTopic(entries: readonly Entry[]): Map<number, number> {
   return m;
 }
 
-/** Today's progress over the active topics (in the given order). */
-export function dayProgress(topics: readonly Topic[], entries: readonly Entry[]): DayProgress {
-  const done = unitsByTopic(entries);
-  const list = topics.filter(isActive).map((t) => topicProgress(t, done.get(t.id) ?? 0));
+/** A topic's progress from the day's entries; `now` is a moment of that day (deadline timestamp, missed or not). */
+export function topicProgressAt(topic: Topic, entries: readonly Entry[], now: number): TopicProgress {
+  const own = entries.filter((e) => e.topicId === topic.id);
+  const done = own.reduce((s, e) => s + e.units, 0);
+  if (topic.deadlineMinutes == null) return topicProgress(topic, done);
+  const deadline = atMinutes(now, topic.deadlineMinutes);
+  const doneByDeadline = own.filter((e) => e.ts < deadline).reduce((s, e) => s + e.units, 0);
+  return topicProgress(topic, done, { deadline, doneByDeadline, now });
+}
+
+/**
+ * A topic as it applies on a day under its rule: that day's target (credit day: met with the minimum; repayment day:
+ * raised by the debt), without the deadline on a credit day.
+ */
+export const topicForDay = (t: Topic, rule: DayRule | undefined): Topic =>
+  rule ? { ...t, dailyTarget: rule.target, deadlineMinutes: rule.ignoreDeadline ? null : t.deadlineMinutes } : t;
+
+/** In the day's norm: active, and on one of its weekdays (by the day's rules). */
+export const activeToday = (t: Topic, rules?: ReadonlyMap<number, DayRule>) =>
+  isActive(t) && rules?.get(t.id)?.active !== false;
+
+/** The day's norm: active topics on their weekday, each with that day's target (`topicForDay`). */
+export const topicsForDay = (topics: readonly Topic[], rules?: ReadonlyMap<number, DayRule>): Topic[] =>
+  topics.filter((t) => activeToday(t, rules)).map((t) => topicForDay(t, rules?.get(t.id)));
+
+/**
+ * Today's progress over the active topics (in the given order); `now` is a moment of the entries' day. `rules`
+ * (`dayRules` in day-rules.ts) leave out topics off that weekday and apply credits.
+ */
+export function dayProgress(
+  topics: readonly Topic[],
+  entries: readonly Entry[],
+  now: number = Date.now(),
+  rules?: ReadonlyMap<number, DayRule>,
+): DayProgress {
+  const list = topics
+    .filter((t) => activeToday(t, rules))
+    .map((t) => {
+      const rule = rules?.get(t.id);
+      const p = topicProgressAt(topicForDay(t, rule), entries, now);
+      return rule ? { ...p, credit: rule.credit, creditable: rule.creditable } : p;
+    });
   const sum = (f: (p: TopicProgress) => number) => list.reduce((s, p) => s + f(p), 0);
   return {
     topics: list,
@@ -151,6 +231,15 @@ export function completionEvents(
 }
 
 export const unitCostMs = (t: Pick<Topic, 'minutesPerUnit'>) => Math.round(Math.max(0, t.minutesPerUnit) * 60_000);
+
+/** «до 15:00» / «срок 15:00 пропущен» for a topic with a deadline and its target not met yet; null otherwise. */
+export function deadlineLabel(
+  p: Pick<TopicProgress, 'deadlineMinutes' | 'deadlineMissed' | 'targetMet'>,
+): string | null {
+  if (p.deadlineMinutes == null || p.targetMet) return null;
+  const time = formatMinutes(p.deadlineMinutes);
+  return p.deadlineMissed ? `срок ${time} пропущен` : `до ${time}`;
+}
 
 /** «12 стр.» */
 export const unitsLabel = (n: number, unit: string) => `${n} ${unit}`;

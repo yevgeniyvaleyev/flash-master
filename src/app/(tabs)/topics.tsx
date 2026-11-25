@@ -2,10 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { TopicMark } from '@/components/TopicMark';
 import { loadToday } from '@/db/repo';
 import { useQuery } from '@/hooks/use-query';
 import { moveTopic } from '@/logic/actions';
 import type { Topic, TopicProgress } from '@/logic/goal';
+import { formatMinutes } from '@/logic/dates';
+import { weekdaysLabel } from '@/logic/day-rules';
 import { formatDayMonth } from '@/logic/history';
 import { useColors } from '@/theme';
 
@@ -40,6 +43,7 @@ export default function TopicsScreen() {
             key={t.id}
             topic={t}
             progress={progress.get(t.id)}
+            offDay={today?.rules.get(t.id)?.active === false}
             first={i === 0}
             last={i === active.length - 1}
           />
@@ -57,7 +61,7 @@ export default function TopicsScreen() {
                   { backgroundColor: pressed ? colors.surfaceAlt : colors.surface, borderColor: colors.border },
                 ]}
               >
-                <View style={[styles.dot, { backgroundColor: t.color, opacity: 0.5 }]} />
+                <TopicMark color={t.color} icon={t.icon} dim />
                 <View style={styles.rowText}>
                   <Text style={[styles.title, { color: colors.textMuted }]}>{t.name}</Text>
                   <Text style={{ color: colors.textMuted, fontSize: 13 }}>
@@ -91,9 +95,12 @@ function ActiveRow({
   progress: p,
   first,
   last,
+  offDay,
 }: {
   topic: Topic;
   progress: TopicProgress | undefined;
+  /** Today isn't one of the topic's weekdays. */
+  offDay: boolean;
   first: boolean;
   last: boolean;
 }) {
@@ -106,16 +113,20 @@ function ActiveRow({
         { backgroundColor: pressed ? colors.surfaceAlt : colors.surface, borderColor: colors.border },
       ]}
     >
-      <View style={[styles.dot, { backgroundColor: t.color }]} />
+      <TopicMark color={t.color} icon={t.icon} />
       <View style={styles.rowText}>
         <Text style={[styles.title, { color: colors.text }]}>{t.name}</Text>
         <Text style={{ color: colors.textMuted, fontSize: 13 }}>
           {t.dailyTarget} {t.unit} в день · минимум {Math.min(t.unlockMin, t.dailyTarget)} · ~{t.minutesPerUnit} мин/
           {t.unit}
+          {t.deadlineMinutes != null ? ` · до ${formatMinutes(t.deadlineMinutes)}` : ''}
+          {weekdaysLabel(t) ? ` · ${weekdaysLabel(t)}` : ''}
         </Text>
       </View>
       {t.paused ? (
         <Ionicons name="pause-circle" size={24} color={colors.textMuted} accessibilityLabel="На паузе" />
+      ) : offDay ? (
+        <Ionicons name="bed-outline" size={22} color={colors.textMuted} accessibilityLabel="Сегодня выходной" />
       ) : p?.targetMet ? (
         <Ionicons name="checkmark-circle" size={24} color={colors.success} accessibilityLabel="Цель выполнена" />
       ) : (
@@ -149,7 +160,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  dot: { width: 12, height: 12, borderRadius: 6 },
   rowText: { flex: 1, gap: 4 },
   title: { fontSize: 16, fontWeight: '700' },
   left: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },

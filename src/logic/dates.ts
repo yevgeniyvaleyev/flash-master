@@ -49,3 +49,28 @@ export function lastDays(count: number, today: Date = new Date()): string[] {
 export function daysToMs(days: number): number {
   return days * DAY_MS;
 }
+
+/**
+ * Timestamp of `minutes` after midnight on the app's day of `now`. Times before the day start hour belong to the end
+ * of the app's day (after midnight), so they land on the next calendar day.
+ */
+export function atMinutes(now: number, minutes: number): number {
+  const d = logicalDay(new Date(now));
+  const extraDay = minutes < dayStartHour * 60 ? 1 : 0;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + extraDay, 0, minutes).getTime();
+}
+
+/** 900 → «15:00» */
+export function formatMinutes(minutes: number): string {
+  const m = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+/** «15:00» / «9:30» → minutes after midnight; null when it isn't a time. */
+export function parseTime(text: string): number | null {
+  const m = /^\s*(\d{1,2})[:.](\d{2})\s*$/.exec(text);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  return h < 24 && min < 60 ? h * 60 + min : null;
+}

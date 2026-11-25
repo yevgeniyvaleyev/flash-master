@@ -8,7 +8,7 @@ import { parseBackup, rowForSchema, type Backup } from '@/logic/backup';
 const cache = globalThis as typeof globalThis & { __flashmasterDb?: SQLite.SQLiteDatabase };
 export const db = (cache.__flashmasterDb ??= SQLite.openDatabaseSync('flashmaster.db'));
 
-export const DATABASE_VERSION = 5;
+export const DATABASE_VERSION = 10;
 
 /** How long a statement waits for another connection's write lock before failing with "database is locked". */
 const BUSY_TIMEOUT_MS = 5_000;
@@ -193,6 +193,51 @@ CREATE TABLE kv (
     // Per-topic cap of entertainment minutes one unit can grant; NULL = the global «Максимум минут за единицу».
     await db.execAsync('ALTER TABLE topics ADD COLUMN max_grant_minutes REAL');
     version = 5;
+  }
+
+  if (version === 5) {
+    // Overall progress toward a topic's total (count mode): units done that aren't in the logged entries since the
+    // reset (work done before the app, or a correction such as «cards learned» read from the flashcards app).
+    await db.execAsync('ALTER TABLE topics ADD COLUMN done_before REAL NOT NULL DEFAULT 0');
+    version = 6;
+  }
+
+  if (version === 6) {
+    // Optional daily deadline of a topic in minutes after midnight (e.g. 900 = 15:00): its target counts only when
+    // reached by then, and the day plan and alarms fit its work before it. NULL = the end of the reminder window.
+    await db.execAsync('ALTER TABLE topics ADD COLUMN deadline_minutes INTEGER');
+    version = 7;
+  }
+
+  if (version === 7) {
+    // Topic icon (MaterialCommunityIcons name), shown in the topic's color instead of the dot. NULL = the dot.
+    await db.execAsync('ALTER TABLE topics ADD COLUMN icon TEXT');
+    version = 8;
+  }
+
+  if (version === 8) {
+    // Web address opened in the browser from the topic screen (course page, online deck). NULL = none.
+    await db.execAsync('ALTER TABLE topics ADD COLUMN link_url TEXT');
+    version = 9;
+  }
+
+  if (version === 9) {
+    // Weekdays a topic is active on (bitmask Mon = 1 … Sun = 64; NULL = every day): on other days it's out of the norm.
+    // Credits: a topic's unfinished target moved to its next 1–2 active days (target/minimum: that day's values).
+    await db.execAsync(`
+ALTER TABLE topics ADD COLUMN weekdays INTEGER;
+CREATE TABLE credits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  topic_id INTEGER NOT NULL REFERENCES topics(id),
+  day TEXT NOT NULL,
+  days INTEGER NOT NULL,
+  target REAL NOT NULL,
+  minimum REAL NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX credits_topic ON credits(topic_id, day);
+`);
+    version = 10;
   }
 
   await db.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);

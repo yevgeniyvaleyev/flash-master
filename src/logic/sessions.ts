@@ -6,6 +6,8 @@ import { durationLabel, unitsLabel } from './goal';
  * topic across the whole day instead of one long block per topic. A session is never shorter than `minSessionMs`
  * (unless the topic's whole remainder is shorter) and always holds whole units. Each topic's sessions sit at evenly
  * spaced points of the day (k + ½) / n, and all sessions are ordered by those points; planDay then spaces them out.
+ * A topic with a deadline spreads its sessions only over the part of the day before it (given `window`), so they come
+ * earlier and closer together.
  */
 
 export interface SessionInput {
@@ -17,11 +19,29 @@ export interface SessionInput {
   units: number;
   /** Time per unit. */
   unitMs: number;
+  /** Today's deadline (timestamp) and its time of day; null = the end of the day. */
+  deadline: number | null;
+  deadlineMinutes: number | null;
 }
 
 export interface WorkSession extends StudyBlock {
   units: number;
   unit: string;
+  deadline: number | null;
+  deadlineMinutes: number | null;
+}
+
+/** The planned part of the day: from max(now, start) to the day's end. */
+export interface PlanWindow {
+  from: number;
+  end: number;
+}
+
+/** Share (0..1] of the window before the deadline; 1 without one, or once it has passed or lies past the end. */
+export function deadlineShare(deadline: number | null, window: PlanWindow | undefined): number {
+  if (deadline == null || !window || window.end <= window.from) return 1;
+  if (deadline <= window.from || deadline >= window.end) return 1;
+  return (deadline - window.from) / (window.end - window.from);
 }
 
 /** «Книга · 12 стр. · ~24 мин» */
@@ -36,10 +56,15 @@ export function sessionCount(units: number, unitMs: number, minSessionMs: number
   return Math.max(1, Math.min(units, Math.floor((units * unitMs) / minSessionMs)));
 }
 
-export function splitSessions(items: readonly SessionInput[], minSessionMs: number): WorkSession[] {
+export function splitSessions(
+  items: readonly SessionInput[],
+  minSessionMs: number,
+  window?: PlanWindow,
+): WorkSession[] {
   const placed: { at: number; order: number; session: WorkSession }[] = [];
   items.forEach((item, order) => {
     const n = sessionCount(item.units, item.unitMs, minSessionMs);
+    const share = deadlineShare(item.deadline, window);
     const base = Math.floor(item.units / n);
     const extra = item.units % n;
     for (let k = 0; k < n; k++) {
@@ -47,7 +72,7 @@ export function splitSessions(items: readonly SessionInput[], minSessionMs: numb
       const units = base + (k < extra ? 1 : 0);
       const costMs = units * item.unitMs;
       placed.push({
-        at: (k + 0.5) / n,
+        at: ((k + 0.5) / n) * share,
         order,
         session: {
           topicId: item.topicId,
@@ -56,6 +81,8 @@ export function splitSessions(items: readonly SessionInput[], minSessionMs: numb
           unit: item.unit,
           units,
           costMs,
+          deadline: item.deadline,
+          deadlineMinutes: item.deadlineMinutes,
           label: blockLabel(item.name, units, item.unit, costMs),
         },
       });

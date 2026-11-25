@@ -1,4 +1,4 @@
-import { addDays, logicalDay } from './dates';
+import { addDays, formatMinutes, logicalDay } from './dates';
 
 export interface ReminderWindow {
   /** First reminder hour (0–23), inclusive. */
@@ -55,12 +55,22 @@ export function planReminders(
 /** Today's reminder text from the progress: what's left to unlock first, then what's left to the targets. */
 export function reminderText(p: {
   unlocked: boolean;
-  topics: readonly { name: string; unit: string; leftToMin: number; leftToTarget: number }[];
+  topics: readonly {
+    name: string;
+    unit: string;
+    leftToMin: number;
+    leftToTarget: number;
+    /** Deadline in minutes after midnight (still ahead); null/undefined = none. */
+    deadlineMinutes?: number | null;
+    deadlineMissed?: boolean;
+  }[];
 }): { title: string; body: string } {
+  const due = (t: (typeof p.topics)[number]) =>
+    t.deadlineMinutes != null && !t.deadlineMissed ? ` (до ${formatMinutes(t.deadlineMinutes)})` : '';
   const list = (left: (t: (typeof p.topics)[number]) => number) =>
     p.topics
       .filter((t) => left(t) > 0)
-      .map((t) => `${t.name} — ${left(t)} ${t.unit}`)
+      .map((t) => `${t.name} — ${left(t)} ${t.unit}${due(t)}`)
       .join(', ');
   if (!p.unlocked) {
     return { title: 'Минимум не выполнен', body: `До разблокировки: ${list((t) => t.leftToMin)}` };

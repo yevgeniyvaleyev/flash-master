@@ -1,4 +1,4 @@
-import { etaDays, positionDelta, PositionError } from '../position';
+import { etaDays, overallProgress, positionDelta, PositionError } from '../position';
 
 describe('positionDelta', () => {
   it('logs the pages since the current one', () => {
@@ -20,4 +20,27 @@ it('estimates the days left', () => {
   expect(etaDays(101, 20)).toBe(6);
   expect(etaDays(0, 20)).toBe(0);
   expect(etaDays(10, 0)).toBeNull();
+});
+
+describe('overallProgress', () => {
+  const base = { mode: 'count' as const, positionTotal: 500, positionCurrent: null, doneBefore: 0 };
+
+  it('is null without a total', () => {
+    expect(overallProgress({ ...base, positionTotal: null }, 10)).toBeNull();
+  });
+
+  it('counts the units logged since the reset plus the units done before (count mode)', () => {
+    expect(overallProgress({ ...base, doneBefore: 120 }, 30)).toEqual({ done: 150, total: 500, left: 350, share: 0.3 });
+  });
+
+  it('takes a correction below the logged units (reviews logged as units) without going negative', () => {
+    expect(overallProgress({ ...base, doneBefore: -40 }, 100)?.done).toBe(60);
+    expect(overallProgress({ ...base, doneBefore: -400 }, 100)?.done).toBe(0);
+  });
+
+  it('uses the page reached in book mode and caps at the total', () => {
+    const book = { ...base, mode: 'position' as const, positionTotal: 300, positionCurrent: 75, doneBefore: 99 };
+    expect(overallProgress(book, 999)).toEqual({ done: 75, total: 300, left: 225, share: 0.25 });
+    expect(overallProgress({ ...book, positionCurrent: 300 }, 0)?.left).toBe(0);
+  });
 });

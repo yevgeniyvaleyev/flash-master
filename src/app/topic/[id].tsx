@@ -2,18 +2,29 @@ import { AppBlocker } from '@modules/app-blocker';
 import { Ionicons } from '@expo/vector-icons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { DailyBars, Meter } from '@/components/charts';
 import { LogControls } from '@/components/LogControls';
 import { PromptModal } from '@/components/PromptModal';
+import { TopicMark } from '@/components/TopicMark';
 import { getTopic, getTopicDays, getTopicTotals, loadToday } from '@/db/repo';
 import { useQuery } from '@/hooks/use-query';
-import { deleteEntry, resetTopicProgress, setTopicCompleted, setTopicPaused } from '@/logic/actions';
+import {
+  cancelCredit,
+  deleteEntry,
+  resetTopicProgress,
+  setTopicCompleted,
+  setTopicDoneBefore,
+  setTopicPaused,
+  takeCredit,
+} from '@/logic/actions';
 import { addDays, dayKey, lastDays } from '@/logic/dates';
-import { topicProgress, unitsByTopic } from '@/logic/goal';
+import { dayDate, nextActiveDays } from '@/logic/day-rules';
+import { deadlineLabel, topicForDay, topicProgressAt } from '@/logic/goal';
 import { formatDayMonth } from '@/logic/history';
-import { etaDays } from '@/logic/position';
+import { urlLabel } from '@/logic/links';
+import { etaDays, overallProgress } from '@/logic/position';
 import { rowsSince, topicStats } from '@/logic/stats';
 import { useColors } from '@/theme';
 
@@ -32,7 +43,7 @@ async function loadTopic(id: number) {
     getTopicDays(WINDOW + 400),
     getTopicTotals(),
   ]);
-  return { topic, today, days, total: totals[id] ?? 0 };
+  return { topic, today, days, total: totals[id] ?? 0, now: Date.now() };
 }
 
 /** One topic: log today's work, today's entries, the linked app, book progress and the topic's statistics. */
@@ -43,6 +54,8 @@ export default function TopicScreen() {
   const data = useQuery(() => loadTopic(topicId), id);
   const [range, setRange] = useState<7 | 30>(WEEK);
   const [pagePrompt, setPagePrompt] = useState(false);
+  // Count mode prompts: the units already done when resetting, or a correction of the overall progress.
+  const [donePrompt, setDonePrompt] = useState<'reset' | 'adjust' | null>(null);
 
   if (!data) return <View style={{ flex: 1, backgroundColor: colors.background }} />;
   const { topic, today } = data;
@@ -55,11 +68,15 @@ export default function TopicScreen() {
   }
 
   const entries = today.entries.filter((e) => e.topicId === topicId).sort((a, b) => b.ts - a.ts);
-  const p = topicProgress(topic, unitsByTopic(today.entries).get(topicId) ?? 0);
+  // Today's rule: weekday and credit (a credit day is met with the minimum, a repayment day has a raised target).
+  const rule = today.rules.get(topicId);
+  const offDay = rule?.active === false;
+  const p = topicProgressAt(topicForDay(topic, rule), today.entries, data.now);
+  const credit = rule?.credit ?? null;
   // Today's live result on top of the stored days (the stored row may lag the last entry).
   const rows = [
     ...data.days.filter((d) => !(d.topicId === topicId && d.day === today.day)),
-    { day: today.day, topicId, target: p.target, minimum: p.minimum, done: p.done, paused: topic.paused },
+    { day: today.day, topicId, target: p.target, minimum: p.minimum, done: p.done, paused: topic.paused || offDay },
   ];
   // After a progress reset the statistics start on the reset day.
   const sinceDay = topic.resetAt != null ? dayKey(new Date(topic.resetAt)) : null;
@@ -73,8 +90,8 @@ export default function TopicScreen() {
     return r.done >= r.target ? colors.success : r.done >= r.minimum ? colors.accent : colors.warning;
   });
   const book = topic.mode === 'position';
-  const pagesLeft = book && topic.positionTotal != null ? topic.positionTotal - (topic.positionCurrent ?? 0) : null;
-  const eta = pagesLeft != null ? etaDays(pagesLeft, stats.avgPerDay || topic.dailyTarget) : null;
+  const overall = overallProgress(topic, data.total);
+  const eta = overall ? etaDays(overall.left, stats.avgPerDay || topic.dailyTarget) : null;
   const card = [styles.card, { backgroundColor: colors.surface, borderColor: colors.border }];
 
   const openLinked = () => {
@@ -82,7 +99,27 @@ export default function TopicScreen() {
     if (!AppBlocker.launchApp(topic.linkedPackage))
       Alert.alert('Не открывается', 'Приложение не найдено на устройстве.');
   };
+  const openLink = () => {
+    if (!topic.linkUrl) return;
+    Linking.openURL(topic.linkUrl).catch(() => Alert.alert('Не открывается', 'Не удалось открыть ссылку в браузере.'));
+  };
   const completed = topic.completedAt != null;
+  const dueLabel = (due: string[]) => due.map((d) => formatDayMonth(dayDate(d))).join(' и ');
+  const confirmCredit = () => {
+    const owed = Math.max(0, p.target - Math.max(p.done, p.minimum));
+    const take = (n: number) => void takeCredit(topicId, n, p.target, p.minimum);
+    Alert.alert(
+      'Взять в долг?',
+      `Сегодня засчитается цель, если выполнен минимум (${p.minimum} ${topic.unit}). Недоделанное до цели (сейчас ${owed} ${topic.unit}) добавится к цели следующих дней: ` +
+        `на 1 день — ${dueLabel(nextActiveDays(topic, today.day, 1))}, на 2 дня — ${dueLabel(nextActiveDays(topic, today.day, 2))}. ` +
+        'Если не вернёшь, день возврата не засчитается. Новый долг по теме — только после возврата.',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'На 2 дня', onPress: () => take(2) },
+        { text: 'На 1 день', onPress: () => take(1) },
+      ],
+    );
+  };
   const confirmComplete = () =>
     Alert.alert(
       'Завершить тему?',
@@ -96,13 +133,22 @@ export default function TopicScreen() {
     Alert.alert(
       'Сбросить прогресс?',
       'Статистика, серия и «Всего» по теме начнутся заново с сегодняшнего дня. Записи остаются в журнале, сегодняшняя норма не меняется.' +
-        (book ? ' Дальше укажешь страницу, с которой начинаешь.' : ''),
+        (book
+          ? ' Дальше укажешь страницу, с которой начинаешь.'
+          : topic.positionTotal != null
+            ? ' Дальше укажешь, сколько уже пройдено.'
+            : ''),
       [
         { text: 'Отмена', style: 'cancel' },
         {
           text: 'Сбросить',
           style: 'destructive',
-          onPress: () => (book ? setPagePrompt(true) : void resetTopicProgress(topicId, Date.now(), null)),
+          onPress: () =>
+            book
+              ? setPagePrompt(true)
+              : topic.positionTotal != null
+                ? setDonePrompt('reset')
+                : void resetTopicProgress(topicId, Date.now(), null),
         },
       ],
     );
@@ -130,7 +176,10 @@ export default function TopicScreen() {
       />
 
       <View style={card}>
-        <Text style={[styles.cardTitle, { color: colors.text }]}>Сегодня</Text>
+        <View style={styles.doneRow}>
+          <TopicMark color={topic.color} icon={topic.icon} />
+          <Text style={[styles.cardTitle, { color: colors.text }]}>Сегодня</Text>
+        </View>
         {completed ? (
           <>
             <View style={styles.doneRow}>
@@ -160,65 +209,142 @@ export default function TopicScreen() {
           </>
         ) : (
           <>
-            <Meter
-              label={
-                p.targetMet
-                  ? 'Цель выполнена'
-                  : p.minMet
-                    ? `Минимум есть · до цели ${p.leftToTarget}`
-                    : `До минимума ${p.leftToMin}`
-              }
-              value={p.done}
-              total={Math.max(p.target, 1)}
-              color={topic.color}
-              mark={p.minimum}
-              suffix={topic.unit}
-            />
-            <Text style={{ color: colors.textMuted, fontSize: 12 }}>
-              Цель {p.target} {topic.unit} · минимум {p.minimum} · ~{topic.minutesPerUnit} мин/{topic.unit}
-              {topic.maxGrantMinutes != null ? ` · до ${topic.maxGrantMinutes} мин развлечений/${topic.unit}` : ''}
-            </Text>
+            {offDay && (
+              <Text style={{ color: colors.textMuted }}>
+                Сегодня выходной по этой теме — она не входит в дневную норму. Заниматься можно, но в норму это не
+                пойдёт.
+              </Text>
+            )}
+            {!offDay && (
+              <Meter
+                label={
+                  (p.targetMet
+                    ? 'Цель выполнена'
+                    : p.minMet
+                      ? `Минимум есть · до цели ${p.leftToTarget}`
+                      : `До минимума ${p.leftToMin}`) + (deadlineLabel(p) ? ` · ${deadlineLabel(p)}` : '')
+                }
+                value={p.done}
+                total={Math.max(p.target, 1)}
+                color={topic.color}
+                mark={p.minimum}
+                suffix={topic.unit}
+              />
+            )}
+            {!offDay && (
+              <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+                Цель {p.target} {topic.unit} · минимум {p.minimum} · ~{topic.minutesPerUnit} мин/{topic.unit}
+                {topic.maxGrantMinutes != null ? ` · до ${topic.maxGrantMinutes} мин развлечений/${topic.unit}` : ''}
+              </Text>
+            )}
+            {credit?.kind === 'taken' && (
+              <View style={styles.doneRow}>
+                <Ionicons name="time-outline" size={18} color={colors.warning} />
+                <Text style={{ color: colors.text, flex: 1 }}>
+                  {credit.debt > 0
+                    ? `В долг: ${credit.debt} ${topic.unit} → ${dueLabel(credit.dueDays)}`
+                    : 'Долг взят, но цель уже выполнена — возвращать нечего'}
+                </Text>
+                <Pressable hitSlop={8} onPress={() => void cancelCredit(credit.creditId)}>
+                  <Text style={{ color: colors.danger, fontWeight: '600' }}>Отменить</Text>
+                </Pressable>
+              </View>
+            )}
+            {credit?.kind === 'repay' && (
+              <View style={styles.doneRow}>
+                <Ionicons name="return-down-back" size={18} color={colors.warning} />
+                <Text style={{ color: colors.text, flex: 1 }}>
+                  Возврат долга: +{credit.share} {topic.unit} к цели сегодня
+                  {credit.dueDays.length > 1 ? ` (день ${credit.dayIndex + 1} из ${credit.dueDays.length})` : ''}
+                </Text>
+              </View>
+            )}
+            {p.deadlineMissed && (
+              <Text style={{ color: colors.danger, fontSize: 13 }}>
+                Цель не выполнена к сроку — день не засчитан. Можно доделать: минимум по-прежнему открывает приложения.
+              </Text>
+            )}
             <LogControls topic={topic} large />
+            {rule?.creditable && !p.targetMet && (
+              <Pressable
+                onPress={confirmCredit}
+                style={({ pressed }) => [styles.secondary, { borderColor: colors.warning, opacity: pressed ? 0.7 : 1 }]}
+              >
+                <Ionicons name="time-outline" size={18} color={colors.warning} />
+                <Text style={{ color: colors.warning, fontWeight: '700' }}>Взять в долг на 1–2 дня</Text>
+              </Pressable>
+            )}
           </>
         )}
-        {topic.linkedPackage && AppBlocker && (
+        {topic.linkUrl && (
           <Pressable
-            onPress={openLinked}
+            onPress={openLink}
             style={({ pressed }) => [styles.secondary, { borderColor: colors.primary, opacity: pressed ? 0.7 : 1 }]}
           >
-            <Ionicons name="open-outline" size={18} color={colors.primary} />
-            <Text style={{ color: colors.primary, fontWeight: '700' }}>Открыть приложение</Text>
+            <Ionicons name="globe-outline" size={18} color={colors.primary} />
+            <Text style={{ color: colors.primary, fontWeight: '700' }} numberOfLines={1}>
+              Открыть {urlLabel(topic.linkUrl)}
+            </Text>
           </Pressable>
+        )}
+        {topic.linkedPackage && (
+          <Pressable
+            onPress={openLinked}
+            disabled={!AppBlocker}
+            style={({ pressed }) => [
+              styles.secondary,
+              { borderColor: AppBlocker ? colors.primary : colors.border, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Ionicons name="open-outline" size={18} color={AppBlocker ? colors.primary : colors.textMuted} />
+            <Text style={{ color: AppBlocker ? colors.primary : colors.textMuted, fontWeight: '700' }}>
+              Открыть приложение
+            </Text>
+          </Pressable>
+        )}
+        {topic.linkedPackage && !AppBlocker && (
+          <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+            Недоступно в Expo Go — работает в установленном приложении (APK)
+          </Text>
         )}
       </View>
 
-      {book && (
+      {overall ? (
         <View style={card}>
-          <Text style={[styles.cardTitle, { color: colors.text }]}>Книга</Text>
-          {topic.positionTotal != null ? (
-            <>
-              <Meter
-                label={`Страница ${topic.positionCurrent ?? 0}`}
-                value={topic.positionCurrent ?? 0}
-                total={topic.positionTotal}
-                color={colors.primary}
-              />
-              <Text style={{ color: colors.textMuted }}>
-                {pagesLeft != null && pagesLeft <= 0
-                  ? completed
-                    ? 'Книга прочитана!'
-                    : 'Книга прочитана! Отметь тему завершённой, чтобы убрать её из дневной нормы.'
-                  : `Прочитано ${Math.round(((topic.positionCurrent ?? 0) / topic.positionTotal) * 100)}% · осталось ${pagesLeft} стр.` +
-                    (eta != null ? ` · закончишь ~${formatDayMonth(addDays(new Date(), eta))}` : '')}
-              </Text>
-            </>
-          ) : (
+          <View style={styles.cardHead}>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>{book ? 'Книга' : 'Общий прогресс'}</Text>
+            {!book && (
+              <Pressable hitSlop={8} onPress={() => setDonePrompt('adjust')} accessibilityLabel="Уточнить прогресс">
+                <Text style={{ color: colors.primary, fontWeight: '600' }}>Уточнить</Text>
+              </Pressable>
+            )}
+          </View>
+          <Meter
+            label={book ? `Страница ${overall.done}` : `Пройдено ${Math.round(overall.share * 100)}%`}
+            value={overall.done}
+            total={overall.total}
+            color={topic.color}
+            suffix={book ? undefined : topic.unit}
+          />
+          <Text style={{ color: colors.textMuted }}>
+            {overall.left <= 0
+              ? (book ? 'Книга прочитана!' : 'Всё пройдено!') +
+                (completed ? '' : ' Отметь тему завершённой, чтобы убрать её из дневной нормы.')
+              : (book ? `Прочитано ${Math.round(overall.share * 100)}% · ` : '') +
+                `осталось ${overall.left} ${topic.unit}` +
+                (eta != null ? ` · закончишь ~${formatDayMonth(addDays(new Date(), eta))}` : '')}
+          </Text>
+        </View>
+      ) : (
+        book && (
+          <View style={card}>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Книга</Text>
             <Text style={{ color: colors.textMuted }}>
               Сейчас на странице {topic.positionCurrent ?? 0}. Укажи число страниц в настройках темы, чтобы видеть
               процент и дату окончания.
             </Text>
-          )}
-        </View>
+          </View>
+        )
       )}
 
       <View style={card}>
@@ -307,6 +433,36 @@ export default function TopicScreen() {
           void resetTopicProgress(topicId, Date.now(), page);
         }}
         onClose={() => setPagePrompt(false)}
+      />
+      <PromptModal
+        visible={donePrompt != null}
+        title={donePrompt === 'reset' ? 'Сколько уже пройдено?' : 'Сколько пройдено всего?'}
+        message={
+          donePrompt === 'reset'
+            ? `0 — с самого начала (всего ${topic.positionTotal ?? 0} ${topic.unit})`
+            : `Например, число изученных карт из приложения с карточками. Всего ${topic.positionTotal ?? 0} ${topic.unit}.`
+        }
+        initialValue={donePrompt === 'reset' ? '0' : String(overall?.done ?? 0)}
+        placeholder={topic.unit}
+        keyboardType="number-pad"
+        confirmLabel={donePrompt === 'reset' ? 'Сбросить' : 'Сохранить'}
+        onSubmit={(v) => {
+          const n = Number(v.trim());
+          if (!Number.isInteger(n) || n < 0) {
+            Alert.alert('Неверное число', 'Введи целое число от 0.');
+            return;
+          }
+          if (topic.positionTotal != null && n > topic.positionTotal) {
+            Alert.alert('Неверное число', `Всего ${topic.positionTotal} ${topic.unit}.`);
+            return;
+          }
+          const mode = donePrompt;
+          setDonePrompt(null);
+          // A correction keeps the logged entries and stores the difference to them.
+          if (mode === 'reset') void resetTopicProgress(topicId, Date.now(), n);
+          else void setTopicDoneBefore(topicId, n - data.total);
+        }}
+        onClose={() => setDonePrompt(null)}
       />
     </ScrollView>
   );

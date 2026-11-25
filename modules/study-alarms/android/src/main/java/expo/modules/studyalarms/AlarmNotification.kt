@@ -8,22 +8,22 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.Icon
-import android.media.AudioAttributes
-import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 
 /**
- * The ringing alarm: a high-priority insistent notification (repeating alarm sound + vibration) with a full-screen
- * intent to AlarmActivity. When the phone is in use Android shows it as a heads-up notification instead.
+ * The ringing alarm's notification: high priority with a full-screen intent to AlarmActivity (a heads-up banner when
+ * Android doesn't open it). It is silent: AlarmRingService plays the chosen sound and the vibration with the chosen
+ * repetition and shows this notification as its foreground notification.
  */
 object AlarmNotification {
-  private const val CHANNEL_ID = "study-alarms"
-  private const val NOTIFICATION_ID = 7301
-  private const val RING_MS = 60_000L
-  private val VIBRATION = longArrayOf(0, 800, 400, 800, 400)
+  /** Silent channel (sound and vibration come from AlarmRingService). */
+  private const val CHANNEL_ID = "study-alarm-ring"
+  /** Channels of earlier versions, where the channel carried sound and vibration. */
+  private const val OLD_CHANNEL_BASE = "study-alarms"
+  const val NOTIFICATION_ID = 7301
 
-  /** The item's `difficulty` field carries a ready label in FlashMaster (e.g. «5 нов. · 12 повт.»). */
+  /** The item's `difficulty` field carries a ready label in FlashMaster (e.g. «12 стр.»). */
   fun difficultyLabel(difficulty: String) = difficulty
 
   /** Opens the topic screen (expo-router handles flashmaster://topic/<topicId>), or just the app. */
@@ -37,42 +37,38 @@ object AlarmNotification {
     return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
   }
 
-  fun show(ctx: Context, item: AlarmStore.Item) {
+  private fun ensureChannel(ctx: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     val nm = ctx.getSystemService(NotificationManager::class.java)
-    val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-      ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-    val audio = AudioAttributes.Builder()
-      .setUsage(AudioAttributes.USAGE_ALARM)
-      .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-      .build()
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      nm.createNotificationChannel(
-        NotificationChannel(CHANNEL_ID, "Будильники учёбы", NotificationManager.IMPORTANCE_HIGH).apply {
-          description = "Будильник в начале каждой запланированной темы"
-          setSound(alarmSound, audio)
-          enableVibration(true)
-          vibrationPattern = VIBRATION
-          lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-        },
-      )
-    }
-
-    val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-    val fullScreen = PendingIntent.getActivity(
-      ctx,
-      10,
-      Intent(ctx, AlarmActivity::class.java)
-        .putExtra(AlarmScheduler.EXTRA_SLUG, item.slug)
-        .putExtra(AlarmScheduler.EXTRA_TITLE, item.title)
-        .putExtra(AlarmScheduler.EXTRA_DIFFICULTY, item.difficulty)
-        .putExtra(AlarmScheduler.EXTRA_COST, item.costMs)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION),
-      flags,
+    nm.createNotificationChannel(
+      NotificationChannel(CHANNEL_ID, "Будильники учёбы", NotificationManager.IMPORTANCE_HIGH).apply {
+        description = "Будильник в начале каждой запланированной темы (звук и вибрация — в настройках FlashMaster)"
+        setSound(null, null)
+        enableVibration(false)
+        lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+      },
     )
+    nm.notificationChannels
+      .filter { it.id == OLD_CHANNEL_BASE || it.id.startsWith("$OLD_CHANNEL_BASE-") }
+      .forEach { nm.deleteNotificationChannel(it.id) }
+  }
+
+  fun build(ctx: Context, item: AlarmStore.Item, timeoutMs: Long): Notification {
+    ensureChannel(ctx)
+    val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+    val fullScreen = PendingIntent.getActivity(ctx, 10, AlarmActivity.intent(ctx, item), flags)
     val start = PendingIntent.getActivity(ctx, 11, openIntent(ctx, item.slug), flags)
+    val snoozeMinutes = AlarmStore.snoozeMinutes(ctx)
     val later = PendingIntent.getBroadcast(
       ctx,
       12,
+      AlarmScheduler.putItem(Intent(ctx, AlarmReceiver::class.java).setAction(AlarmReceiver.ACTION_SNOOZE), item),
+      flags,
+    )
+    // Swiping the notification away stops the ringing.
+    val stop = PendingIntent.getBroadcast(
+      ctx,
+      13,
       Intent(ctx, AlarmReceiver::class.java).setAction(AlarmReceiver.ACTION_DISMISS),
       flags,
     )
@@ -90,22 +86,27 @@ object AlarmNotification {
       .setVisibility(Notification.VISIBILITY_PUBLIC)
       .setFullScreenIntent(fullScreen, true)
       .setContentIntent(start)
+      .setDeleteIntent(stop)
       .setAutoCancel(true)
       .addAction(Notification.Action.Builder(null as Icon?, "Начать", start).build())
-      .addAction(Notification.Action.Builder(null as Icon?, "Позже", later).build())
+      .addAction(Notification.Action.Builder(null as Icon?, "Отложить на $snoozeMinutes мин", later).build())
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      builder.setTimeoutAfter(RING_MS)
+      builder.setTimeoutAfter(timeoutMs)
     } else {
       @Suppress("DEPRECATION")
-      builder.setPriority(Notification.PRIORITY_MAX).setSound(alarmSound, audio).setVibrate(VIBRATION)
+      builder.setPriority(Notification.PRIORITY_MAX)
     }
-    val notification = builder.build()
-    // Repeat sound and vibration until the user reacts (or the timeout removes it).
-    notification.flags = notification.flags or Notification.FLAG_INSISTENT
-    nm.notify(NOTIFICATION_ID, notification)
+    return builder.build()
   }
 
+  /** Rings: AlarmRingService plays the sound and vibration and shows the notification. */
+  fun show(ctx: Context, item: AlarmStore.Item) {
+    AlarmRingService.start(ctx, item)
+  }
+
+  /** Stops the ringing (sound, vibration) and removes the notification. */
   fun cancel(ctx: Context) {
+    AlarmRingService.stop(ctx)
     ctx.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
   }
 

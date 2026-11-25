@@ -77,6 +77,8 @@ export interface StudyBlock {
   color: string;
   label: string;
   costMs: number;
+  /** The topic's deadline today (the plan fits the block before it); null/undefined = the day's end. */
+  deadline?: number | null;
 }
 
 export type TimelineSegment =
@@ -147,8 +149,9 @@ export function dayTimeline(input: {
   const ended = input.now >= end;
   const shortageMs = ended ? 0 : Math.max(0, reserve - Math.max(0, end - now));
   const latestStart = end - reserve;
-  const plan = planDay({ now: input.now, start, deadline: end, items: blocks }).map((b, i) => ({
-    ...blocks[i],
+  // In time order (blocks before a topic deadline may be moved ahead of others).
+  const plan = planDay({ now: input.now, start, deadline: end, items: blocks }).map((b) => ({
+    ...blocks[b.index],
     ...b,
   }));
 

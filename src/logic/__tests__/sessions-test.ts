@@ -1,4 +1,4 @@
-import { sessionCount, splitSessions, type SessionInput } from '../sessions';
+import { deadlineShare, sessionCount, splitSessions, type SessionInput } from '../sessions';
 import { nextTopicColor, TOPIC_COLORS } from '../topic-colors';
 
 const MIN = 60_000;
@@ -9,6 +9,8 @@ const topic = (topicId: number, units: number, minutesPerUnit: number): SessionI
   color: TOPIC_COLORS[topicId],
   units,
   unitMs: minutesPerUnit * MIN,
+  deadline: null,
+  deadlineMinutes: null,
 });
 
 describe('sessionCount', () => {
@@ -53,5 +55,25 @@ describe('nextTopicColor', () => {
   it('takes the first unused palette color', () => {
     expect(nextTopicColor([])).toBe(TOPIC_COLORS[0]);
     expect(nextTopicColor([TOPIC_COLORS[0].toLowerCase(), TOPIC_COLORS[2]])).toBe(TOPIC_COLORS[1]);
+  });
+});
+
+describe('deadlines', () => {
+  const window = { from: 0, end: 600 * MIN };
+
+  it('is the share of the window before the deadline, 1 without one or once passed', () => {
+    expect(deadlineShare(300 * MIN, window)).toBe(0.5);
+    expect(deadlineShare(null, window)).toBe(1);
+    expect(deadlineShare(0, window)).toBe(1);
+    expect(deadlineShare(700 * MIN, window)).toBe(1);
+  });
+
+  it("moves a deadline topic's sessions into the part of the day before its deadline", () => {
+    const a = topic(1, 4, 15); // 4 sessions over the whole day: 1/8, 3/8, 5/8, 7/8
+    const b = { ...topic(2, 2, 15), deadline: 300 * MIN, deadlineMinutes: 900 }; // 2 sessions: 1/8, 3/8 of the day
+    const order = splitSessions([a, b], 15 * MIN, window).map((s) => s.topicId);
+    expect(order).toEqual([1, 2, 1, 2, 1, 1]);
+    // Without a window the deadline is ignored: b at 1/4, 3/4.
+    expect(splitSessions([a, b], 15 * MIN).map((s) => s.topicId)).toEqual([1, 2, 1, 1, 2, 1]);
   });
 });

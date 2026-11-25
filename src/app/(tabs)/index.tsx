@@ -11,7 +11,9 @@ import { LogControls } from '@/components/LogControls';
 import { getDayResults } from '@/db/repo';
 import { useQuery } from '@/hooks/use-query';
 import { availableMs, dayTimeline } from '@/logic/budget';
+import { formatMinutes } from '@/logic/dates';
 import { loadDayBudget } from '@/logic/day-budget';
+import { deadlineLabel, isActive } from '@/logic/goal';
 import { computeStreak } from '@/logic/progress';
 import { useSettings } from '@/store/settings';
 import { useColors } from '@/theme';
@@ -67,6 +69,8 @@ export default function TodayScreen() {
   });
   const card = [styles.card, { backgroundColor: colors.surface, borderColor: colors.border }];
   const paused = topics.filter((t) => t.paused && t.completedAt == null);
+  // Active topics whose weekday isn't today.
+  const resting = topics.filter((t) => isActive(t) && b.today.rules.get(t.id)?.active === false);
 
   // Completed topics live on the «Темы» tab only.
   if (topics.every((t) => t.completedAt != null)) {
@@ -129,9 +133,13 @@ export default function TodayScreen() {
               key: p.topicId,
               name: p.name,
               color: p.color,
+              icon: byId.get(p.topicId)?.icon ?? null,
               done: p.done,
               target: p.target,
               minimum: p.minimum,
+              targetMet: p.targetMet,
+              deadline: p.deadlineMinutes != null ? formatMinutes(p.deadlineMinutes) : null,
+              missed: p.deadlineMissed,
             }))}
           />
         )}
@@ -155,12 +163,18 @@ export default function TodayScreen() {
                   mark={p.minimum}
                   suffix={p.unit}
                 />
-                <Text style={{ color: colors.textMuted, fontSize: 12 }}>
-                  {p.targetMet
+                <Text style={{ color: p.deadlineMissed ? colors.danger : colors.textMuted, fontSize: 12 }}>
+                  {(p.targetMet
                     ? 'Цель выполнена'
-                    : p.minMet
-                      ? `Минимум есть · до цели ${p.leftToTarget} ${p.unit}`
-                      : `До минимума ${p.leftToMin} ${p.unit} · до цели ${p.leftToTarget}`}
+                    : (p.minMet
+                        ? `Минимум есть · до цели ${p.leftToTarget} ${p.unit}`
+                        : `До минимума ${p.leftToMin} ${p.unit} · до цели ${p.leftToTarget}`) +
+                      (deadlineLabel(p) ? ` · ${deadlineLabel(p)}` : '')) +
+                    (p.credit?.kind === 'taken' && p.credit.debt > 0
+                      ? ` · в долг ${p.credit.debt} ${p.unit}`
+                      : p.credit?.kind === 'repay'
+                        ? ` · +${p.credit.share} долг`
+                        : '')}
                 </Text>
               </Pressable>
               <LogControls topic={topic} />
@@ -172,12 +186,22 @@ export default function TodayScreen() {
             На паузе: {paused.map((t) => t.name).join(', ')}
           </Text>
         )}
+        {resting.length > 0 && (
+          <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+            Сегодня выходной: {resting.map((t) => t.name).join(', ')}
+          </Text>
+        )}
       </View>
 
       {b.start < b.deadline && (
         <View style={card}>
           <Text style={[styles.cardTitle, { color: colors.text }]}>План дня</Text>
-          <DayTimeline timeline={timeline} alarms={alarms} nextTitle={timeline.plan[0]?.label} />
+          <DayTimeline
+            timeline={timeline}
+            alarms={alarms}
+            nextTitle={timeline.plan[0]?.label}
+            icons={new Map(topics.map((t) => [t.id, t.icon]))}
+          />
         </View>
       )}
     </ScrollView>

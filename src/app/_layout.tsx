@@ -28,7 +28,10 @@ export default function RootLayout() {
   const isDark = useIsDark();
 
   useEffect(() => {
-    bootstrap().finally(() => setReady(true));
+    // Foreground syncs wait for the start-up: before the migrations finish, new tables don't exist yet.
+    const booted = bootstrap()
+      .catch((e) => console.warn('bootstrap failed', e))
+      .finally(() => setReady(true));
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'background') {
         // Complete .db file for Android Auto Backup.
@@ -37,8 +40,10 @@ export default function RootLayout() {
       }
       if (state !== 'active') return;
       // The day may have changed while the app was in the background: refresh the screens too.
-      useDataVersion.getState().bump();
-      void syncBackground().then(() => runAutoBackup());
+      void booted.then(() => {
+        useDataVersion.getState().bump();
+        return syncBackground().then(() => runAutoBackup());
+      });
     });
     const unsubscribe = useSettings.subscribe((next, prev) => {
       if (BACKGROUND_SETTING_KEYS.some((k) => next[k] !== prev[k])) void syncBackground();
