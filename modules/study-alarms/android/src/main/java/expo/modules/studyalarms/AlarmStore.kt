@@ -22,6 +22,9 @@ object AlarmStore {
     val difficulty: String,
     val costMs: Long,
     val deadlineMinutes: Int = -1,
+    /** Icon character in the MaterialCommunityIcons font ("" = none) and the topic's color (hex). */
+    val icon: String = "",
+    val color: String = "",
   )
 
   data class Config(
@@ -56,7 +59,7 @@ object AlarmStore {
     items.forEach {
       json.put(
         JSONObject().put("slug", it.slug).put("title", it.title).put("difficulty", it.difficulty).put("costMs", it.costMs.toLong())
-          .put("deadlineMinutes", it.deadlineMinutes),
+          .put("deadlineMinutes", it.deadlineMinutes).put("icon", it.icon).put("color", it.color),
       )
     }
     return json.toString()
@@ -72,6 +75,8 @@ object AlarmStore {
         o.getString("difficulty"),
         o.getLong("costMs"),
         o.optInt("deadlineMinutes", -1),
+        o.optString("icon", ""),
+        o.optString("color", ""),
       )
     }
   }
@@ -150,6 +155,8 @@ object AlarmStore {
       .put("difficulty", item.difficulty)
       .put("costMs", item.costMs)
       .put("deadlineMinutes", item.deadlineMinutes)
+      .put("icon", item.icon)
+      .put("color", item.color)
     prefs(ctx).edit()
       .putLong("snoozeAt", at)
       .putString("snoozeItem", json.toString())
@@ -169,6 +176,8 @@ object AlarmStore {
       o.getString("difficulty"),
       o.getLong("costMs"),
       o.optInt("deadlineMinutes", -1),
+      o.optString("icon", ""),
+      o.optString("color", ""),
     )
   }
 

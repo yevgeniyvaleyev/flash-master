@@ -18,6 +18,10 @@ class AlarmItemRecord : Record {
   @Field var costMs: Double = 0.0
   /** The topic's deadline in minutes after midnight; -1 = none. */
   @Field var deadlineMinutes: Int = -1
+  /** The topic icon's character in the MaterialCommunityIcons font; "" = none. */
+  @Field var icon: String = ""
+  /** The topic's color (hex). */
+  @Field var color: String = ""
 }
 
 /** Planning inputs pushed from JS whenever progress or settings change. */

@@ -18,6 +18,8 @@ object AlarmScheduler {
   const val EXTRA_DIFFICULTY = "difficulty"
   const val EXTRA_COST = "costMs"
   const val EXTRA_DEADLINE = "deadlineMinutes"
+  const val EXTRA_ICON = "icon"
+  const val EXTRA_COLOR = "color"
   /** The ring comes from a snooze (not from the plan). */
   const val EXTRA_SNOOZE = "snooze"
   const val MIN_SNOOZE_MINUTES = 5
@@ -81,6 +83,8 @@ object AlarmScheduler {
     difficulty = intent.getStringExtra(EXTRA_DIFFICULTY) ?: "",
     costMs = intent.getLongExtra(EXTRA_COST, 0L),
     deadlineMinutes = intent.getIntExtra(EXTRA_DEADLINE, -1),
+    icon = intent.getStringExtra(EXTRA_ICON) ?: "",
+    color = intent.getStringExtra(EXTRA_COLOR) ?: "",
   )
 
   /** Puts `item` into an intent's extras. */
@@ -90,6 +94,8 @@ object AlarmScheduler {
       .putExtra(EXTRA_DIFFICULTY, item.difficulty)
       .putExtra(EXTRA_COST, item.costMs)
       .putExtra(EXTRA_DEADLINE, item.deadlineMinutes)
+      .putExtra(EXTRA_ICON, item.icon)
+      .putExtra(EXTRA_COLOR, item.color)
 
   fun test(ctx: Context) {
     val item = AlarmStore.read(ctx).upcoming.firstOrNull()

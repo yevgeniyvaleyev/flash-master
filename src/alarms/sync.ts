@@ -5,6 +5,7 @@ import { atHour } from '@/logic/budget';
 import { atMinutes } from '@/logic/dates';
 import { topicsForDay, unitCostMs, unitsLabel } from '@/logic/goal';
 import { splitSessions } from '@/logic/sessions';
+import { iconGlyph } from '@/components/TopicMark';
 import { vibrationOf, vibrationRepeatOf, vibrationWaveform } from '@/logic/vibration';
 import { useSettings } from '@/store/settings';
 
@@ -25,6 +26,8 @@ export async function syncAlarms(budget?: DayBudget): Promise<void> {
   const b = budget ?? (await loadDayBudget());
   // Tomorrow's norm: its weekdays and targets (raised by a credit being repaid).
   const active = topicsForDay(b.today.topics, b.today.tomorrow);
+  // The alarm screen shows the topic's icon in its color (nothing without an icon).
+  const icons = new Map(b.today.topics.map((t) => [t.id, iconGlyph(t.icon)]));
   // Tomorrow's order: today's hours, the whole window (nothing done yet).
   const dayStart = atHour(b.now, s.reminderStartHour);
   const tomorrow: AlarmItem[] = splitSessions(
@@ -48,6 +51,8 @@ export async function syncAlarms(budget?: DayBudget): Promise<void> {
     difficulty: unitsLabel(session.units, session.unit),
     costMs: session.costMs,
     deadlineMinutes: session.deadlineMinutes ?? -1,
+    icon: icons.get(session.topicId) ?? '',
+    color: session.color,
   }));
   StudyAlarms.setConfig({
     enabled: s.alarmsEnabled,
@@ -64,6 +69,8 @@ export async function syncAlarms(budget?: DayBudget): Promise<void> {
       costMs: block.costMs,
       // A missed deadline no longer constrains the plan.
       deadlineMinutes: block.deadline != null && block.deadline > b.now ? (block.deadlineMinutes ?? -1) : -1,
+      icon: icons.get(block.topicId) ?? '',
+      color: block.color,
     })),
     tomorrowGoal: active.reduce((sum, t) => sum + Math.max(0, t.dailyTarget), 0),
     tomorrow,

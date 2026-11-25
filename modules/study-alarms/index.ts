@@ -12,6 +12,10 @@ export interface AlarmItem {
   costMs: number;
   /** The topic's deadline in minutes after midnight (the plan fits the item before it); -1 = none. */
   deadlineMinutes: number;
+  /** The topic icon's character in the MaterialCommunityIcons font (alarm screen); '' = none. */
+  icon: string;
+  /** The topic's color (hex), for the icon. */
+  color: string;
 }
 
 export interface StudyAlarmsConfig {

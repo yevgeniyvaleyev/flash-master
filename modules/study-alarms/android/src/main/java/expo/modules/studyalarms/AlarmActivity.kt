@@ -46,6 +46,9 @@ class AlarmActivity : Activity() {
     private val SUBTLE = Color.parseColor("#B0B6C3")
     private val LINE = Color.parseColor("#3A3F4B")
 
+    /** The icon font, loaded once from the module's assets. */
+    private var iconFont: Typeface? = null
+
     fun intent(ctx: Context, item: AlarmStore.Item): Intent =
       AlarmScheduler.putItem(Intent(ctx, AlarmActivity::class.java), item)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION)
@@ -94,6 +97,24 @@ class AlarmActivity : Activity() {
     restartTimeout(TIMEOUT_MS)
   }
 
+  /** The topic icon (MaterialCommunityIcons glyph from JS) in the topic's color, or null without one. */
+  private fun iconView(): TextView? {
+    if (item.icon.isEmpty()) return null
+    val face = iconFont ?: runCatching { Typeface.createFromAsset(assets, "fonts/MaterialCommunityIcons.ttf") }
+      .getOrNull()
+      ?.also { iconFont = it }
+      ?: return null
+    val color = runCatching { Color.parseColor(item.color) }.getOrDefault(ACCENT)
+    return TextView(this).apply {
+      text = item.icon
+      typeface = face
+      textSize = 112f
+      setTextColor(color)
+      gravity = Gravity.CENTER
+      includeFontPadding = false
+    }
+  }
+
   private fun build(): View {
     val config = AlarmStore.read(this)
     val deadline = StudyPlan.atHour(config.logical(System.currentTimeMillis()), 0, config.endHour)
@@ -106,6 +127,11 @@ class AlarmActivity : Activity() {
     }
     content.addView(text("⏰  Пора поработать", 18f, ACCENT, bold = true))
     content.addView(space(16))
+    // The topic's icon in its color fills the empty middle of the screen; nothing without an icon.
+    iconView()?.let {
+      content.addView(it)
+      content.addView(space(12))
+    }
     content.addView(text(item.title, 34f, Color.WHITE, bold = true))
     content.addView(space(8))
     content.addView(text("${AlarmNotification.difficultyLabel(item.difficulty)} · ~$minutes мин", 18f, SUBTLE))

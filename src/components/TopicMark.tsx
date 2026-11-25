@@ -10,6 +10,16 @@ export type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 export const ICON_NAMES = Object.keys(MaterialCommunityIcons.glyphMap) as IconName[];
 const ICON_SET: ReadonlySet<string> = new Set(ICON_NAMES);
 
+/**
+ * The icon's character in the MaterialCommunityIcons font, for native screens that draw it themselves (the alarm
+ * screen); '' without a valid icon.
+ */
+export function iconGlyph(icon: string | null | undefined): string {
+  const name = validIcon(icon, ICON_SET);
+  const code = name ? (MaterialCommunityIcons.glyphMap as Record<string, number>)[name] : undefined;
+  return code == null ? '' : String.fromCodePoint(code);
+}
+
 /** A topic's mark: its icon in its color, or a color dot without one (or with a name the font doesn't have). */
 export function TopicMark({
   color,
