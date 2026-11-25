@@ -32,7 +32,8 @@ import { ensureNotificationPermission, remindersSupported } from '@/notification
 import { useSettings, type ThemeMode } from '@/store/settings';
 import { useColors } from '@/theme';
 
-const hourLabel = (h: number) => `${String(h).padStart(2, '0')}:00`;
+/** 9 → «09:00»; hours past midnight (the working day may run until the new day starts) → «01:00». */
+const hourLabel = (h: number) => `${String(h % 24).padStart(2, '0')}:00`;
 /** Latest «Новый день с»; the learning day (reminder window) may not start before it. */
 const MAX_DAY_START_HOUR = 6;
 
@@ -209,7 +210,8 @@ export default function SettingsScreen() {
         <Row label="Новый день с" hint="Записи до этого часа засчитываются в предыдущий день">
           <Stepper
             value={s.dayStartHour}
-            min={0}
+            // The working day may end after midnight, but not after the new day starts.
+            min={Math.max(0, s.reminderEndHour - 24)}
             max={Math.min(MAX_DAY_START_HOUR, s.reminderStartHour)}
             format={hourLabel}
             onChange={(v) => s.update({ dayStartHour: v })}
@@ -224,11 +226,15 @@ export default function SettingsScreen() {
             onChange={(v) => s.update({ reminderStartHour: v })}
           />
         </Row>
-        <Row label="Рабочий день до" hint="К этому времени минимум должен быть выполнен">
+        <Row
+          label="Рабочий день до"
+          hint="К этому времени минимум должен быть выполнен. Можно и после полуночи — до начала нового дня"
+        >
           <Stepper
             value={s.reminderEndHour}
             min={s.reminderStartHour + 1}
-            max={23}
+            // Hours past 23 are after midnight, still on this app day (up to «Новый день с»).
+            max={24 + s.dayStartHour}
             format={hourLabel}
             onChange={(v) => s.update({ reminderEndHour: v })}
           />

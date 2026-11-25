@@ -27,6 +27,7 @@ export interface Settings {
   blockedPackages: string[];
   remindersEnabled: boolean;
   reminderStartHour: number;
+  /** End of the working day; 24+ = after midnight, up to 24 + dayStartHour (still the same app day). */
   reminderEndHour: number;
   reminderIntervalHours: number;
   /** Vibration of reminders and of study alarms (presets in src/logic/vibration.ts). */

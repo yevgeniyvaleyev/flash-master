@@ -81,6 +81,7 @@ These are app days, not calendar days.
 
 - `dayKey()` (`src/logic/dates.ts`) shifts the day by `dayStartHour`. The native blocker and alarms shift their `today()` the same way.
 - Stored day keys are never recomputed.
+- The working day («Рабочий день до», `reminderEndHour`) may end after midnight: hours 24+ are on the same app day, up to `24 + dayStartHour`. `atHour` (JS) and `StudyPlan.atHour` (lenient `Calendar`) roll them over to the next calendar day.
 - A streak (`computeStreak` and `bestStreak` in `src/logic/progress.ts`) skips neutral days (`null`: no active topic, or a paused topic). A day with no result breaks the streak.
 
 ### Reactivity

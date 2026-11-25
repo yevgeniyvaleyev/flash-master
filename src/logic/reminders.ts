@@ -3,7 +3,7 @@ import { addDays, formatMinutes, logicalDay } from './dates';
 export interface ReminderWindow {
   /** First reminder hour (0–23), inclusive. */
   startHour: number;
-  /** Last reminder hour (0–23), inclusive. */
+  /** Last reminder hour, inclusive; 24+ = after midnight (the app day runs until the day start hour). */
   endHour: number;
   /** Hours between reminders (≥ 1). */
   intervalHours: number;

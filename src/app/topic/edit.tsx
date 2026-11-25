@@ -313,13 +313,14 @@ export default function TopicEditScreen() {
         </Row>
         <Row
           label="Срок на день"
-          hint={`Необязательно: к этому времени цель должна быть выполнена, иначе день не засчитан. План дня и будильники уложат тему до срока. Пусто — до конца дня (${endHour}:00)`}
+          hint={`Необязательно: к этому времени цель должна быть выполнена, иначе день не засчитан. План дня и будильники уложат тему до срока. Пусто — до конца рабочего дня (${formatMinutes(endHour * 60)})`}
         >
           <TextInput
             value={form.deadline}
             onChangeText={(deadline) => set({ deadline })}
             keyboardType="numbers-and-punctuation"
-            placeholder="15:00"
+            // Empty = the end of the working day, so that's what the empty field shows.
+            placeholder={formatMinutes(endHour * 60)}
             placeholderTextColor={colors.textMuted}
             selectTextOnFocus
             style={[...input, styles.number]}
