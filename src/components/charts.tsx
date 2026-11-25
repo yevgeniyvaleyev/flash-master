@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, Text, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect } from 'react-native-svg';
 
 import { useColors } from '@/theme';
@@ -20,6 +21,8 @@ export interface TopicBar {
   /** The topic's deadline «15:00» and whether it was missed. */
   deadline?: string | null;
   missed?: boolean;
+  /** Status line under the bar (what's left, deadline, credit); red when `missed`. */
+  note?: string;
 }
 
 /**
@@ -28,7 +31,19 @@ export interface TopicBar {
  * A lock means the minimum isn't met yet (the fill stays faded until it is); a check means the target is met. A
  * topic with a deadline shows its time (red once missed).
  */
-export function TopicBars({ items }: { items: readonly TopicBar[] }) {
+export function TopicBars({
+  items,
+  onPress,
+  trailing,
+  trailingWidth = 0,
+}: {
+  items: readonly TopicBar[];
+  /** Makes each bar tappable (opens the topic). */
+  onPress?: (key: TopicBar['key']) => void;
+  /** Content right of each bar (log buttons), in a column of `trailingWidth` so every bar has the same length. */
+  trailing?: (key: TopicBar['key']) => ReactNode;
+  trailingWidth?: number;
+}) {
   const colors = useColors();
   return (
     <View style={styles.barsList}>
@@ -37,8 +52,8 @@ export function TopicBars({ items }: { items: readonly TopicBar[] }) {
         const ratio = Math.min(1, t.done / total);
         const targetMet = t.targetMet ?? t.done >= t.target;
         const minMet = t.done >= t.minimum;
-        return (
-          <View key={t.key} style={styles.barItem}>
+        const bar = (
+          <View style={styles.barItem}>
             <View style={styles.barHead}>
               {t.icon ? <TopicMark color={t.color} icon={t.icon} size={10} /> : null}
               <Text style={[styles.barTitle, { color: colors.text }]}>{t.name}</Text>
@@ -70,6 +85,26 @@ export function TopicBars({ items }: { items: readonly TopicBar[] }) {
                 />
               )}
             </View>
+            {t.note ? (
+              <Text style={{ color: t.missed ? colors.danger : colors.textMuted, fontSize: 12 }}>{t.note}</Text>
+            ) : null}
+          </View>
+        );
+        return (
+          <View key={t.key} style={styles.barRow}>
+            {onPress ? (
+              <Pressable
+                style={({ pressed }) => [styles.barMain, { opacity: pressed ? 0.6 : 1 }]}
+                onPress={() => onPress(t.key)}
+                accessibilityRole="button"
+                accessibilityLabel={t.name}
+              >
+                {bar}
+              </Pressable>
+            ) : (
+              <View style={styles.barMain}>{bar}</View>
+            )}
+            {trailing && <View style={[styles.barTrailing, { width: trailingWidth }]}>{trailing(t.key)}</View>}
           </View>
         );
       })}
@@ -205,6 +240,9 @@ export function Meter({
 
 const styles = StyleSheet.create({
   barsList: { gap: 12 },
+  barRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  barMain: { flex: 1 },
+  barTrailing: { alignItems: 'flex-end' },
   barItem: { gap: 5 },
   barHead: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   barDeadline: { flexDirection: 'row', alignItems: 'center', gap: 2 },

@@ -165,7 +165,7 @@ A topic with a total shows «Общий прогресс» (or «Книга») o
 
 expo-router ships its own fork of react-navigation, so don't install `@react-navigation/*`.
 
-- Tabs in `src/app/(tabs)`: Сегодня (summary, horizontal per-topic bars `TopicBars` in one column (full name above each bar, minimum line), logging rows, day plan; the badge shows units left to unlock), Темы, Статистика, Настройки.
+- Tabs in `src/app/(tabs)`: Сегодня (summary, horizontal per-topic bars `TopicBars` in one column (full name above each bar, minimum line, status line under it; tapping a bar opens the topic; with the setting `dashboardLogButtons` «Кнопки +1 на главном» the log buttons sit in a fixed-width column right of every bar so all bars have one length), day plan; the badge shows units left to unlock), Темы, Статистика, Настройки.
 - Stack screens: `topic/[id]` (log, entries, book, statistics), `topic/edit` (create, or edit with `?id=`), `blocked-apps`.
 - Logging buttons live in `src/components/LogControls.tsx`.
 

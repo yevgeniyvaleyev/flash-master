@@ -5,7 +5,7 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Meter, TopicBars } from '@/components/charts';
+import { TopicBars } from '@/components/charts';
 import { DayTimeline } from '@/components/DayTimeline';
 import { LogControls } from '@/components/LogControls';
 import { getDayResults } from '@/db/repo';
@@ -13,7 +13,7 @@ import { useQuery } from '@/hooks/use-query';
 import { availableMs, dayTimeline } from '@/logic/budget';
 import { formatMinutes } from '@/logic/dates';
 import { loadDayBudget } from '@/logic/day-budget';
-import { deadlineLabel, fineAt, isActive } from '@/logic/goal';
+import { deadlineLabel, fineAt, isActive, type TopicProgress } from '@/logic/goal';
 import { computeStreak } from '@/logic/progress';
 import { useSettings } from '@/store/settings';
 import { useColors } from '@/theme';
@@ -29,6 +29,26 @@ const hhmm = (ms: number) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
+/** Width of the log buttons column, the same for every topic so all bars have one length (+1, +step, ✎). */
+const LOG_COLUMN = 140;
+
+/** A topic's status under its bar: what's left (the bar's head shows the count and the deadline) and its credit. */
+function topicNote(p: TopicProgress): string {
+  const left = p.targetMet
+    ? ''
+    : p.minMet
+      ? `до цели ${p.leftToTarget} ${p.unit}`
+      : `до минимума ${p.leftToMin} ${p.unit} · до цели ${p.leftToTarget}`;
+  const credit =
+    p.credit?.kind === 'taken' && p.credit.debt > 0
+      ? `в долг ${p.credit.debt} ${p.unit}`
+      : p.credit?.kind === 'repay'
+        ? `+${p.credit.share} долг`
+        : '';
+  const missed = p.deadlineMissed ? deadlineLabel(p) : '';
+  return [left, missed, credit].filter(Boolean).join(' · ');
+}
+
 const formatLeft = (left: number | null) => (left == null ? 'без ограничений' : `${Math.floor(left / 60_000)} мин.`);
 
 /** Current time, refreshed every minute (moves the "now" marker and the live cap). */
@@ -41,12 +61,16 @@ function useNow(): number {
   return now;
 }
 
-/** Today: what's left to unlock the apps and to reach the targets, logging per topic, and the day plan. */
+/**
+ * Today: what's left to unlock the apps and to reach the targets, one bar per topic (tap opens the topic; log buttons
+ * beside them with «Кнопки +1 на главном»), and the day plan.
+ */
 export default function TodayScreen() {
   const colors = useColors();
   const blocking = useSettings((s) => s.blockedPackages.length > 0) && AppBlocker != null;
   const alarms = useSettings((s) => s.alarmsEnabled) && StudyAlarms != null;
   const fineOn = useSettings((s) => s.deadlineFine);
+  const logButtons = useSettings((s) => s.dashboardLogButtons);
   // The budget reads these settings, so reload when any of them changes.
   const budgetKey = useSettings((s) =>
     JSON.stringify([s.dayStartHour, s.maxGrantMinutes, s.minSessionMinutes, s.reminderStartHour, s.reminderEndHour]),
@@ -156,47 +180,13 @@ export default function TodayScreen() {
               targetMet: p.targetMet,
               deadline: p.deadlineMinutes != null ? formatMinutes(p.deadlineMinutes) : null,
               missed: p.deadlineMissed,
+              note: topicNote(p),
             }))}
+            onPress={(id) => router.push({ pathname: '/topic/[id]', params: { id: String(id) } })}
+            trailing={logButtons ? (id) => <LogControls topic={byId.get(Number(id))!} /> : undefined}
+            trailingWidth={LOG_COLUMN}
           />
         )}
-      </View>
-
-      <View style={card}>
-        <Text style={[styles.cardTitle, { color: colors.text }]}>Темы на сегодня</Text>
-        {progress.topics.map((p) => {
-          const topic = byId.get(p.topicId)!;
-          return (
-            <View key={p.topicId} style={styles.topicRow}>
-              <Pressable
-                style={{ flex: 1, gap: 4 }}
-                onPress={() => router.push({ pathname: '/topic/[id]', params: { id: String(p.topicId) } })}
-              >
-                <Meter
-                  label={p.name}
-                  value={p.done}
-                  total={Math.max(p.target, 1)}
-                  color={p.color}
-                  mark={p.minimum}
-                  suffix={p.unit}
-                />
-                <Text style={{ color: p.deadlineMissed ? colors.danger : colors.textMuted, fontSize: 12 }}>
-                  {(p.targetMet
-                    ? 'Цель выполнена'
-                    : (p.minMet
-                        ? `Минимум есть · до цели ${p.leftToTarget} ${p.unit}`
-                        : `До минимума ${p.leftToMin} ${p.unit} · до цели ${p.leftToTarget}`) +
-                      (deadlineLabel(p) ? ` · ${deadlineLabel(p)}` : '')) +
-                    (p.credit?.kind === 'taken' && p.credit.debt > 0
-                      ? ` · в долг ${p.credit.debt} ${p.unit}`
-                      : p.credit?.kind === 'repay'
-                        ? ` · +${p.credit.share} долг`
-                        : '')}
-                </Text>
-              </Pressable>
-              <LogControls topic={topic} />
-            </View>
-          );
-        })}
         {paused.length > 0 && (
           <Text style={{ color: colors.textMuted, fontSize: 12 }}>
             На паузе: {paused.map((t) => t.name).join(', ')}
@@ -231,7 +221,6 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 16, rowGap: 6 },
   statRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   cardTitle: { fontSize: 16, fontWeight: '700' },
-  topicRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
   emptyText: { fontSize: 18, fontWeight: '700' },
   button: {

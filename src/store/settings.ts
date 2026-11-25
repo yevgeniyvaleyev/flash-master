@@ -45,6 +45,8 @@ export interface Settings {
   alarmsEnabled: boolean;
   /** A topic's deadline missed without its target blocks the blocked apps until the end of the day. */
   deadlineFine: boolean;
+  /** Log buttons (+1, +step) next to each topic on the dashboard; off = log from the topic screen. */
+  dashboardLogButtons: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -67,6 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
   alarmSoundTitle: '',
   alarmsEnabled: true,
   deadlineFine: false,
+  dashboardLogButtons: false,
   autoBackupEnabled: false,
   autoBackupKeep: 7,
 };

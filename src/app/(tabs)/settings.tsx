@@ -186,6 +186,16 @@ export default function SettingsScreen() {
             ))}
           </View>
         </Row>
+        <Row
+          label="Кнопки +1 на главном"
+          hint="Кнопки записи рядом с каждой темой на «Сегодня». Выключено — записывай с экрана темы (нажми на тему)"
+        >
+          <Switch
+            value={s.dashboardLogButtons}
+            onValueChange={(v) => s.update({ dashboardLogButtons: v })}
+            trackColor={{ true: colors.primary }}
+          />
+        </Row>
       </View>
 
       <Text style={[styles.section, { color: colors.textMuted }]}>День</Text>
