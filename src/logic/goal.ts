@@ -252,3 +252,17 @@ export function durationLabel(ms: number): string {
   const m = min % 60;
   return m === 0 ? `~${h} ч` : `~${h} ч ${m} мин`;
 }
+
+/**
+ * The deadline fine (setting «Штраф за пропущенный срок»): the earliest deadline among today's topics whose target
+ * isn't met by it, both still ahead (the native blocker fines at that moment even with the app closed) and already
+ * missed. A target met in time drops its deadline; so does a credit (its day has no deadline). null = no fine.
+ */
+export function fineAt(progress: Pick<DayProgress, 'topics'>): { at: number; topic: string } | null {
+  let fine: { at: number; topic: string } | null = null;
+  for (const p of progress.topics) {
+    if (p.deadline == null || p.targetMet) continue;
+    if (!fine || p.deadline < fine.at) fine = { at: p.deadline, topic: p.name };
+  }
+  return fine;
+}

@@ -2,13 +2,15 @@ import { AppBlocker } from '@modules/app-blocker';
 
 import { saveDayResults } from '@/db/repo';
 import { loadDayBudget, type DayBudget } from '@/logic/day-budget';
+import { fineAt } from '@/logic/goal';
 import { useSettings } from '@/store/settings';
 
 /**
  * Saves today's results and pushes the adaptive budget and the app selection to the native blocker (no-op in Expo
  * Go). The native side only knows "tasks": dailyGoal = Σ minimums of the active topics, learnedToday = units toward
  * them, so its `learned >= goal` check unlocks everything once every minimum is met. Apps linked to a topic are
- * never blocked.
+ * never blocked. With «Штраф за пропущенный срок» on, `fineAtMs` is the earliest deadline whose target isn't met by
+ * it: from then on everything blocked stays blocked until the day ends.
  */
 export async function syncBlocker(budget?: DayBudget): Promise<void> {
   const b = budget ?? (await loadDayBudget());
@@ -27,5 +29,8 @@ export async function syncBlocker(budget?: DayBudget): Promise<void> {
     reserveMs: b.reserve,
     day: b.today.day,
     dayStartHour: s.dayStartHour,
+    ...((fine) => ({ fineAtMs: fine?.at ?? 0, fineTopic: fine?.topic ?? '' }))(
+      s.deadlineFine ? fineAt(b.today.progress) : null,
+    ),
   });
 }

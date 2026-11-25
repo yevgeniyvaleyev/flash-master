@@ -22,6 +22,8 @@ class BlockActivity : Activity() {
     val goal = BlockerStore.goal(this)
     val deadline = BlockerStore.deadlineMs(this)
     val deadlineText = if (deadline > 0) SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(deadline)) else null
+    val fined = BlockerStore.fined(this)
+    val fineTime = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(BlockerStore.fineAtMs(this)))
     val reason = when {
       learned == 0 -> "Время на развлечения открывается сделанной работой."
       // Balance left, so the deadline cap is what blocks.
@@ -46,12 +48,17 @@ class BlockActivity : Activity() {
       setBackgroundColor(Color.parseColor("#0F1115"))
       val pad = (32 * dp).toInt()
       setPadding(pad, pad, pad, pad)
-      addView(label("Сначала выполни минимум", 26f, Color.WHITE, bold = true))
+      addView(label(if (fined) "Штраф до конца дня" else "Сначала выполни минимум", 26f, Color.WHITE, bold = true))
       addView(
         label(
-          "Сделано сегодня: $learned из $goal." +
-            (deadlineText?.let { " Рабочий день до $it — осталось ${goal - learned}." } ?: "") +
-            "\n$reason Выполненный минимум снимает блокировку до конца дня.",
+          if (fined) {
+            "Тема «${BlockerStore.fineTopic(this@BlockActivity)}» не выполнена к сроку $fineTime. " +
+              "Блокировка снимется в новый день или долгом на эту тему."
+          } else {
+            "Сделано сегодня: $learned из $goal." +
+              (deadlineText?.let { " Рабочий день до $it — осталось ${goal - learned}." } ?: "") +
+              "\n$reason Выполненный минимум снимает блокировку до конца дня."
+          },
           16f,
           Color.parseColor("#B0B6C3"),
         ),

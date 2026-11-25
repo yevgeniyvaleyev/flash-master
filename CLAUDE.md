@@ -103,6 +103,7 @@ This is a Kotlin AccessibilityService copied from AlgoMaster.
 - Topics' `linkedPackage`s are removed from `blockedPackages` before `setConfig`.
 - `launchApp(pkg)` opens a linked app.
 - The module is `null` in Expo Go.
+- **Deadline fine** (setting `deadlineFine`, «Штраф за пропущенный срок», off by default): `fineAt` (goal.ts) is the earliest deadline among today's topics whose target isn't met by it. `syncBlocker` sends it as `fineAtMs`/`fineTopic`; from that moment `BlockerService` blocks every blocked app until the day ends, whatever the minimum and the balance, and `BlockActivity` says why. A target met in time or a credit on the topic (its day has no deadline) drops the fine on the next sync; finishing late doesn't.
 
 ### Coexistence with AlgoMaster
 

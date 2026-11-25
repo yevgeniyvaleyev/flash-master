@@ -39,6 +39,8 @@ object BlockerStore {
       .putLong("reserveMs", config.reserveMs.toLong())
       .putString("day", config.day)
       .putInt("dayStartHour", config.dayStartHour)
+      .putLong("fineAtMs", config.fineAtMs.toLong())
+      .putString("fineTopic", config.fineTopic)
       .apply()
   }
 
@@ -75,6 +77,17 @@ object BlockerStore {
     val p = prefs(ctx)
     val slack = p.getLong("deadlineMs", 0L) - nowMs - p.getLong("reserveMs", 0L)
     return minOf(p.getLong("grantedMs", 0L) - usedMs, slack)
+  }
+
+  /** Deadline fine of today (epoch ms; 0 = none or the config is from an earlier day). */
+  fun fineAtMs(ctx: Context): Long = if (isToday(ctx)) prefs(ctx).getLong("fineAtMs", 0L) else 0L
+
+  fun fineTopic(ctx: Context): String = prefs(ctx).getString("fineTopic", "") ?: ""
+
+  /** A topic's deadline passed without its target: everything blocked stays blocked until the day ends. */
+  fun fined(ctx: Context, nowMs: Long = System.currentTimeMillis()): Boolean {
+    val at = fineAtMs(ctx)
+    return at > 0 && nowMs >= at
   }
 
   fun usedTodayMs(ctx: Context): Long {

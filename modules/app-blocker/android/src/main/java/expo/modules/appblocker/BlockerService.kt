@@ -94,15 +94,24 @@ class BlockerService : AccessibilityService() {
     val pkg = foreground ?: return
     val start = sessionStart ?: return
     if (!BlockerStore.isBlockedPackage(this, pkg)) return
+    // Deadline fine: blocked until the day ends, whatever the goal and the balance.
+    val now = System.currentTimeMillis()
+    if (BlockerStore.fined(this, now)) {
+      block()
+      return
+    }
+    // A fine still ahead lands on time inside an open app.
+    val fineAt = BlockerStore.fineAtMs(this)
+    val untilFine = if (fineAt > now) fineAt - now else Long.MAX_VALUE
     if (BlockerStore.goalMet(this)) {
       // Unlimited for today; re-check periodically in case the day changes.
-      handler.postDelayed(recheck, 60_000L)
+      handler.postDelayed(recheck, minOf(60_000L, untilFine))
       return
     }
     val used = BlockerStore.usedTodayMs(this) + (SystemClock.elapsedRealtime() - start)
     // Both the balance and the deadline slack shrink 1:1 with time while the app is used, so this delay is exact.
     val remaining = BlockerStore.availableMs(this, used)
-    if (remaining <= 0) block() else handler.postDelayed(recheck, minOf(remaining, 60_000L))
+    if (remaining <= 0) block() else handler.postDelayed(recheck, minOf(remaining, 60_000L, untilFine))
   }
 
   /**

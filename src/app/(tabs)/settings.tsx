@@ -436,6 +436,21 @@ export default function SettingsScreen() {
           <Stepper value={s.maxGrantMinutes} min={1} max={60} onChange={(v) => s.update({ maxGrantMinutes: v })} />
         </Row>
         <Row
+          label="Штраф за пропущенный срок"
+          hint={
+            AppBlocker
+              ? 'Если цель темы со сроком не выполнена к сроку, блокируемые приложения закрыты до конца дня, даже с выполненным минимумом. Долг на эту тему снимает штраф'
+              : 'Недоступно в Expo Go — работает в установленном приложении (APK)'
+          }
+        >
+          <Switch
+            disabled={!AppBlocker}
+            value={AppBlocker != null && s.deadlineFine}
+            onValueChange={(v) => s.update({ deadlineFine: v })}
+            trackColor={{ true: colors.primary }}
+          />
+        </Row>
+        <Row
           label="Служба блокировки"
           hint={
             !AppBlocker

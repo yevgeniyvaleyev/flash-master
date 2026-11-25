@@ -13,7 +13,7 @@ import { useQuery } from '@/hooks/use-query';
 import { availableMs, dayTimeline } from '@/logic/budget';
 import { formatMinutes } from '@/logic/dates';
 import { loadDayBudget } from '@/logic/day-budget';
-import { deadlineLabel, isActive } from '@/logic/goal';
+import { deadlineLabel, fineAt, isActive } from '@/logic/goal';
 import { computeStreak } from '@/logic/progress';
 import { useSettings } from '@/store/settings';
 import { useColors } from '@/theme';
@@ -23,6 +23,11 @@ async function loadDashboard() {
   // Expo Go has no blocker, so nothing has been used there.
   return { budget, results, usedMs: AppBlocker?.getUsedMs() ?? 0 };
 }
+
+const hhmm = (ms: number) => {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
 
 const formatLeft = (left: number | null) => (left == null ? 'без ограничений' : `${Math.floor(left / 60_000)} мин.`);
 
@@ -41,6 +46,7 @@ export default function TodayScreen() {
   const colors = useColors();
   const blocking = useSettings((s) => s.blockedPackages.length > 0) && AppBlocker != null;
   const alarms = useSettings((s) => s.alarmsEnabled) && StudyAlarms != null;
+  const fineOn = useSettings((s) => s.deadlineFine);
   // The budget reads these settings, so reload when any of them changes.
   const budgetKey = useSettings((s) =>
     JSON.stringify([s.dayStartHour, s.maxGrantMinutes, s.minSessionMinutes, s.reminderStartHour, s.reminderEndHour]),
@@ -57,7 +63,10 @@ export default function TodayScreen() {
     ...data.results,
     [b.today.day]: progress.targetTotal === 0 ? null : progress.targetMet,
   });
-  const available = availableMs(now, b.done, b.goal, b.granted, data.usedMs, b.deadline, b.reserve);
+  // Deadline fine: once a deadline passes without its target, the blocked apps stay closed until the day ends.
+  const fine = blocking && fineOn ? fineAt(progress) : null;
+  const fined = fine != null && now >= fine.at;
+  const available = fined ? 0 : availableMs(now, b.done, b.goal, b.granted, data.usedMs, b.deadline, b.reserve);
   const timeline = dayTimeline({
     now,
     start: b.start,
@@ -127,6 +136,13 @@ export default function TodayScreen() {
             </View>
           )}
         </View>
+        {fine && (
+          <Text style={{ color: fined ? colors.danger : colors.textMuted, fontSize: 13 }}>
+            {fined
+              ? `Штраф: срок «${fine.topic}» пропущен — развлечения закрыты до конца дня. Долг на тему снимает штраф`
+              : `«${fine.topic}» не успеешь к ${hhmm(fine.at)} — штраф: развлечения закрыты до конца дня`}
+          </Text>
+        )}
         {progress.topics.length > 0 && (
           <TopicBars
             items={progress.topics.map((p) => ({

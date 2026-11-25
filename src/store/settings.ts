@@ -43,6 +43,8 @@ export interface Settings {
   autoBackupKeep: number;
   /** Full-screen alarm at the start of each evenly planned topic block (installed builds only). */
   alarmsEnabled: boolean;
+  /** A topic's deadline missed without its target blocks the blocked apps until the end of the day. */
+  deadlineFine: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -64,6 +66,7 @@ export const DEFAULT_SETTINGS: Settings = {
   alarmSound: '',
   alarmSoundTitle: '',
   alarmsEnabled: true,
+  deadlineFine: false,
   autoBackupEnabled: false,
   autoBackupKeep: 7,
 };

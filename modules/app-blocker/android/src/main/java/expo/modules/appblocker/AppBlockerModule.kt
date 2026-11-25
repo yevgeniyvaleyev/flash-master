@@ -21,6 +21,8 @@ class BlockerConfig : Record {
   @Field var reserveMs: Double = 0.0
   @Field var day: String = ""
   @Field var dayStartHour: Int = 0
+  @Field var fineAtMs: Double = 0.0
+  @Field var fineTopic: String = ""
 }
 
 class AppBlockerModule : Module() {

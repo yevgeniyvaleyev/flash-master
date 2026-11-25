@@ -18,6 +18,10 @@ export interface BlockerConfig {
   day: string;
   /** Hour the app's day starts (setting «Новый день с»); the native "today" is shifted by it. */
   dayStartHour: number;
+  /** Deadline fine (epoch ms): from then until the day ends every blocked app is blocked; 0 = none. */
+  fineAtMs: number;
+  /** The topic whose deadline it is (block screen text). */
+  fineTopic: string;
 }
 
 export interface LaunchableApp {

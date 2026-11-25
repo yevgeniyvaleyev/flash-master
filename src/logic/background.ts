@@ -19,6 +19,7 @@ export const BACKGROUND_SETTING_KEYS = [
   'alarmVibration',
   'alarmVibrationRepeat',
   'alarmSound',
+  'deadlineFine',
 ] as const;
 
 /** Brings reminders, study alarms and the native app blocker in line with the current progress and settings. */

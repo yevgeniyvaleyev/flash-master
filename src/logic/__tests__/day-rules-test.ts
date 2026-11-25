@@ -9,7 +9,7 @@ import {
   weekdaysLabel,
   type Credit,
 } from '../day-rules';
-import { dayProgress, type Entry, type Topic } from '../goal';
+import { dayProgress, fineAt, type Entry, type Topic } from '../goal';
 
 // 2024-01-01 is a Monday.
 const MON = '2024-01-01';
@@ -169,5 +169,44 @@ describe('credit', () => {
     const tue = dayProgress([t], e(20), 0, tueRules);
     expect(tue.topics[0].target).toBe(28);
     expect(tue.targetMet).toBe(false);
+  });
+});
+
+describe('fineAt', () => {
+  const at = (h: number) => new Date(2024, 0, 1, h).getTime();
+  const e = (topicId: number, units: number, ts: number): Entry => ({
+    id: topicId * 100 + ts,
+    topicId,
+    day: MON,
+    ts,
+    units,
+    position: null,
+  });
+
+  it('is null without deadlines', () => {
+    expect(fineAt(dayProgress([topic()], [], at(20)))).toBeNull();
+  });
+
+  it('takes the earliest deadline whose target is not met by it, ahead or missed', () => {
+    const a = topic({ id: 1, name: 'A', deadlineMinutes: 15 * 60 });
+    const b = topic({ id: 2, name: 'B', deadlineMinutes: 12 * 60 });
+    expect(fineAt(dayProgress([a, b], [], at(9)))).toEqual({ at: at(12), topic: 'B' });
+    expect(fineAt(dayProgress([a, b], [], at(13)))).toEqual({ at: at(12), topic: 'B' });
+  });
+
+  it('ignores a target met in time but keeps one met late', () => {
+    const b = topic({ id: 2, name: 'B', deadlineMinutes: 12 * 60 });
+    expect(fineAt(dayProgress([b], [e(2, 20, at(11))], at(13)))).toBeNull();
+    expect(fineAt(dayProgress([b], [e(2, 20, at(13))], at(14)))).toEqual({ at: at(12), topic: 'B' });
+  });
+
+  it('has no fine on a credit day, for paused or off-day topics', () => {
+    const t = topic({ deadlineMinutes: 12 * 60 });
+    const credited = new Map([[1, dayRule(t, [credit()], done({ [MON]: 4 }), MON)]]);
+    expect(fineAt(dayProgress([t], [e(1, 4, at(9))], at(13), credited))).toBeNull();
+    expect(fineAt(dayProgress([{ ...t, paused: true }], [], at(13)))).toBeNull();
+    const off = topic({ deadlineMinutes: 12 * 60, weekdays: 2 });
+    const offRules = new Map([[1, dayRule(off, [], new Map(), MON)]]);
+    expect(fineAt(dayProgress([off], [], at(13), offRules))).toBeNull();
   });
 });
